@@ -1,0 +1,60 @@
+name: verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Candidate image (default: latest edge build)'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository_owner }}/llama-edge
+
+# Promotion rule: the stable tag moves only when this workflow is green.
+# GPU jobs need a self-hosted runner labelled edge-gpu with an Intel GPU,
+# the model volume and no production inference running beside them.
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Binaries answer without a GPU
+        run: |
+          IMG="${{ inputs.image || format('{0}/{1}:edge', env.REGISTRY, env.IMAGE) }}"
+          docker run --rm --entrypoint /app/llama-server "$IMG" --help >/dev/null
+          docker run --rm --entrypoint /app/whisper-server "$IMG" --help >/dev/null
+          docker run --rm --entrypoint /app/gate "$IMG" --health
+          echo smoke-ok
+
+  whisper-sycl:
+    needs: smoke
+    runs-on: [self-hosted, edge-gpu]
+    steps:
+      - name: Transcribe the reference sample
+        run: |
+          IMG="${{ inputs.image || format('{0}/{1}:edge', env.REGISTRY, env.IMAGE) }}"
+          test -f ${MODELS_DIR}/whisper-large-v3.gguf || { echo missing-model; exit 1; }
+          docker run --rm --device ${DRI_RENDER} --group-add ${RENDER_GID} \
+            -v ${MODELS_DIR}:/models:ro \
+            -e ONEAPI_DEVICE_SELECTOR=level_zero:0 -e GGML_SYCL_DEVICE=0 \
+            --entrypoint /app/whisper-server "$IMG" \
+            --model /models/whisper-large-v3.gguf --port 8099 &
+          SRV=$!
+          trap "kill $SRV" EXIT
+          sleep 20
+          curl -fsS -F file=@${SAMPLE_WAV} -F response_format=json \
+            http://127.0.0.1:8099/inference | tee result.json
+          grep -qi "${EXPECTED_PHRASE}" result.json
+
+  bench:
+    needs: smoke
+    runs-on: [self-hosted, edge-gpu]
+    steps:
+      - name: A/B against the pinned upstream image
+        run: |
+          echo "Run the pinned retry fixture on the candidate and on"
+          echo "ghcr.io/ggml-org/llama.cpp:server-intel@sha256:<pinned>,"
+          echo "one model at a time, production runtime stopped."
+          echo "Promote only on win or parity for the shipped presets."
