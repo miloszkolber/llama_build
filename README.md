@@ -1,53 +1,77 @@
-# llama_edge
+# llama_build
 
-All-in-one inference image for Intel GPUs: `llama.cpp` (SYCL) plus
-`whisper.cpp` (SYCL) plus `gate`, built from pinned sources with a current
-Intel driver stack, shipped on a distroless runtime stage.
+Independent Intel GPU images: `llama_runtime` (SYCL) and
+`whisper_runtime` (Vulkan by default, experimental SYCL option).
+The lightweight `gate` image stays separate. Compose calls its service
+`llama`, matching the existing on-demand deployment.
 
-Status: draft. Nothing here runs production traffic yet. Each integration
-carries a verification gate in `docs/architecture.md`. No benchmark runs
-while production inference is active.
+Status: build draft. Image compilation, Intel GPU inference and idle DRM
+release still need validation. Nothing here updates production.
 
-## Layout
+## Release policy
 
-| Path | Content |
-| --- | --- |
-| `Dockerfile` | Multi-stage all-in-one build |
-| `.github/workflows/build.yml` | Pinned build plus scheduled refresh to GHCR |
-| `.github/workflows/verify.yml` | Smoke plus benchmark gate before promotion |
-| `docs/architecture.md` | Phase plan, gate integration, healthcheck rework, risks |
-| `compose/edge.compose.yml` | Migration example with placeholder variables |
-| `compose/.env.example` | Values the deployment host provides |
+| Image | Selection | Schedule |
+| --- | --- | --- |
+| `llama_runtime` | Latest `b…` prerelease until stable 0.7.0 or newer exists, then latest stable semantic version | Daily at 02:00 Europe/Warsaw |
+| `whisper_runtime` | Latest stable `vX.Y.Z`, minimum v1.9.5 | Weekly Monday at 02:00 Europe/Warsaw, or manually |
+| `gate` | Existing separately maintained source, explicit ref | Manual only |
 
-## Quickstart
+These are source releases, not upstream container base images. Each
+runtime compiles the selected release at its resolved commit with the
+pinned oneAPI and Intel driver stack. Whisper follows versioned releases
+including patches, not master. v0.6.0 already exists, so llama changes
+channels automatically at the next feature release, v0.7.0. Manual builds
+may select an explicit release tag, including v0.6.0.
+
+GitHub cron is UTC. Two UTC triggers plus a Europe/Warsaw time check
+account for summer/winter time. Scheduled jobs can run late. The window
+accepts delays within the selected local hour.
+
+Workflows publish backend-prefixed `candidate` and immutable source/run tags after
+binary smoke checks. They do not deploy or claim GPU acceptance. Use an
+immutable digest in production after GPU and quality validation.
+
+## Compose
 
 ```sh
 cp compose/.env.example compose/.env
-# Fill in model, device and registry values for this host.
-docker compose -f compose/edge.compose.yml config --quiet
+cp compose/llama.env.example compose/llama.env
+cp compose/whisper.env.example compose/whisper.env
+cp compose/models.ini.example compose/models.ini
+docker compose --project-directory compose -f compose/docker-compose.yaml config --quiet
+docker compose --project-directory compose -f compose/docker-compose.yaml --profile runtime create
+docker compose --project-directory compose -f compose/docker-compose.yaml up -d llama
 ```
 
-Local full build (needs the oneAPI toolchain download, tens of minutes):
+Fill model paths, image references and device/socket group IDs first.
+Runtime containers must exist for gate to start them. They remain stopped
+until requested. This template uses the current host-network topology and
+loopback listeners. It intentionally omits host-specific CPU affinity,
+ulimits, capabilities, read-only/tmpfs policies and update-manager labels.
+Add deployment-specific policies in a local override.
+
+## Independent builds
 
 ```sh
-docker buildx build -f Dockerfile \
-  --build-context gate-image=core/gate \
-  --build-arg LLAMA_SHA=<pinned> --build-arg WHISPER_REF=<pinned> .
+docker build --target llama_runtime -t llama_runtime .
+docker build --target whisper_runtime -t whisper_runtime .
+docker build --target whisper_runtime --build-arg WHISPER_BACKEND=sycl -t whisper_runtime:sycl .
+docker build -f gate/Dockerfile -t gate ../gate
 ```
 
-## Version policy
+Gate's context must contain `server/go.mod` and `server/main.go`. Set
+`GATE_CONTEXT` for another layout. CI's manual gate workflow requires the
+separate source repository and ref. No Docker socket or GPU device belongs
+in either build job.
 
-Every upstream input is a pinned `ARG`: `llama.cpp` and `whisper.cpp`
-commits, oneAPI toolkit, Level Zero, compute runtime and IGC. The weekly
-schedule rebuilds with the pinned values to catch silent drift; bumps are
-deliberate commits that must pass `verify.yml` before the `stable` tag
-moves. Rolling latest is a non-goal.
+Runtime images use a shell-free `scratch` rootfs assembled from the
+Ubuntu build stage's matching runtime libraries. They contain no compiler
+executables, package manager or gate. A tiny static HTTP probe replaces
+curl healthchecks. See `docs/architecture.md` for limits and pending checks.
 
-## Why this exists
-
-The upstream `server-intel` image trails the Intel driver stack (it
-bundles compute runtime 26.18 and IGC 2.34.4 while 26.35 and IGC 2.41.5
-are available), and its final stage ships the full 16 GB compiler
-toolkit. A driver-only rebuild once measured +43% MoE generation on this
-class of hardware (upstream issue 24045). This repo exists to capture
-that class of win repeatably, minus the 16 GB.
+Whisper's shell-free entrypoint consumes `WHISPER_*` environment variables
+and execs the server as PID 1. Compose has no command block. It preserves
+conditional VAD: enabled only when requested and the model file is nonempty.
+Missing VAD emits a warning and starts without it, matching the old shell
+condition. Explicit command arguments replace environment defaults.
+See `docs/whisper-backends.md` for the maintenance assessment and A/B criteria.

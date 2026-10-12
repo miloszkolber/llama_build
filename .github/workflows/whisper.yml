@@ -1,0 +1,26 @@
+name: whisper_runtime
+on:
+  schedule:
+    - cron: '0 0,1 * * 1'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Stable release tag override (empty = latest stable)'
+        type: string
+        default: ''
+      backend:
+        description: 'Vulkan is the default; SYCL is experimental'
+        type: choice
+        options: [vulkan, sycl]
+        default: vulkan
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    uses: ./.github/workflows/runtime.yml
+    with:
+      component: whisper
+      backend: ${{ inputs.backend || 'vulkan' }}
+      release_tag: ${{ inputs.release_tag || '' }}
+    secrets: inherit

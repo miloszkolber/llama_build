@@ -2,3 +2,9 @@
 build/
 out/
 compose/.env
+compose/llama.env
+compose/whisper.env
+compose/models.ini
+compose/models/
+compose/cache/
+__pycache__/

@@ -1,71 +1,89 @@
-# llama_edge architecture
+# Architecture and verification
 
-## Goal
+## Topology
 
-One image carrying the full Intel inference stack: `llama-server`
-(SYCL), `whisper-server` (SYCL) and `gate`. Smaller than the 16 GB
-upstream image, current on drivers, hardened toward distroless, with
-promotion gated on measured results.
+One independently buildable image per role: `gate`, `llama_runtime`,
+`whisper_runtime`. Gate service `llama` has no DRM mappings. It retains
+the existing Docker-socket persistent-proxy behavior, starts runtimes on
+first request and stops them when idle. Stopping the whole GPU runtime
+container is the required DRM-release boundary. No process-supervisor or
+all-in-one image is planned.
 
-## Phase 1: one image, three roles (this draft)
+The Compose template retains runtime profiles, host networking, model and
+cache mounts, readiness checks and the gate config. Container names match
+the gate's runtime names. Non-root runtime users need the configured DRM
+group. Gate needs the socket group. The socket grants control of the Docker
+daemon and is not made safe by a distroless image.
 
-The image ships all three binaries. The existing compose topology stays:
-one service per role, each overriding the entrypoint. The gate keeps
-supervising over the Docker socket exactly as today, so no gate rewrite
-is needed to adopt the image.
+## Runtime assembly
 
-- Gate role: `ENTRYPOINT ["/app/gate"]`, keep `CMD ["/app/gate",
-  "--health"]` as its healthcheck. Unchanged behavior.
-- Llama role: `ENTRYPOINT ["/app/llama-server"]` with the current
-  `models.ini` mount and SYCL environment. No container healthcheck:
-  the gate already waits on HTTP readiness before proxying, and
-  distroless ships no `curl`. Dropping the informational Docker
-  healthcheck changes no runtime behavior.
-- Whisper role: `ENTRYPOINT ["/app/whisper-server"]` with the current
-  whisper flags. Same healthcheck reasoning as llama.
+The common Dockerfile has independent final targets. Building one does
+not build the other. Each has its own GGML libraries, avoiding ABI/name
+collisions between llama.cpp and whisper.cpp.
 
-Proposed small gate adjustment, backward compatible: add a
-`gate --probe <url>` subcommand that exits 0 on HTTP 200. It gives
-server roles a healthchecker without adding `curl` to the image, and
-is independently useful for the current deployment. It does not change
-any supervision path.
+The SYCL Ubuntu 24.04 build stage installs pinned Level Zero 1.34.0, compute
+runtime 26.35.39758.10 and IGC 2.41.5. Runtime assembly copies the matching
+loader/libc dependency closure, oneAPI runtime library directories and
+Intel GPU plugins loaded dynamically. The final scratch stage contains
+no shell, compiler binaries or package manager. This avoids mixing Ubuntu
+libraries with a Debian distroless base. It is a custom distroless-style
+rootfs, not an official distroless image. Final size is unmeasured.
 
-## Phase 2: gate as supervisor, single container (designed, not drafted)
+Library collection fails on unresolved linked dependencies. GPU smoke
+must still exercise dynamically loaded adapters and JIT compilation.
+oneAPI runtime directories are deliberately broader than an ldd-only
+closure. Narrow them only after GPU evidence. Upstream licenses and
+installed-package copyright files are retained in the rootfs.
 
-The gate gains a process backend: spawn `llama-server` and
-`whisper-server` as child processes on first request, wait on the same
-HTTP readiness paths, kill on the same idle timeouts, keep the same
-startup-timeout and race handling. The Docker socket mount and the
-`-runtime` sidecar containers disappear. This is new gate code with new
-tests, owned as a follow-up. Phase 1 must be green first.
+Whisper defaults to Vulkan with Ubuntu's Mesa Intel driver. SYCL uses the
+same pinned Intel compute stack as llama only when explicitly requested.
+Both Whisper variants link FFmpeg decoding libraries.
+Do not use `--convert`: upstream implements that option through a shell
+and ffmpeg executable, neither of which is present. The template keeps
+automatic language, no-fallback, flash attention and the current API path.
+The static entrypoint handles environment settings and conditional VAD,
+then execs the server directly. There is no Compose shell or command block. Model format
+must match whisper.cpp (normally a ggml .bin file), not llama GGUF.
 
-## Healthcheck rework
+## Healthchecks
 
-| Role | Check | Rationale |
-| --- | --- | --- |
-| Gate | `/app/gate --health` (kept) | Self-contained, works in distroless today |
-| Llama, whisper | None at Docker level in Phase 1; `gate --probe` once added | No shell or curl in final stage; gate readiness waits are the real gate |
-| Phase 2 | Single gate check plus backend status aggregation | One container, one check |
+`/app/probe URL` requires HTTP 200, has a two-second deadline and never
+starts a runtime. Compose uses it for each runtime. Gate retains its
+existing `--health` command. In the current gate source this is only a
+binary execution check, not proof of listeners or Docker connectivity.
+Gate readiness continues to check each backend before forwarding traffic.
 
-## Risks
+## Release and publishing boundaries
 
-- R1, whisper SYCL on Battlemage: upstream documents Arc 770-era
-  hardware. The B50 path, the `whisper-server` target under SYCL and
-  F16 transcription quality are all unverified. `verify.yml` blocks
-  traffic until a sample transcription matches the Vulkan baseline.
-  Keep the Vulkan service until then.
-- R2, audio conversion: distroless ships no ffmpeg. The rootfs stage
-  installs it from Ubuntu for whisper uploads. If size pressure wins,
-  restrict inputs to WAV first and drop it deliberately, not silently.
-- R3, slim-library misses: Level Zero and IGC load plugins via
-  `dlopen`, which `ldd` cannot see. The Dockerfile copies the
-  `libze*`, `libig*`, SYCL and offload lib globs in addition to the
-  `ldd` closure. Any miss fails loudly at first GPU smoke, never
-  silently at 2am.
-- R4, gate source has no remote: the build takes the gate binary from
-  the existing local `core/gate` image. Publish it to GHCR once for CI
-  (`docker tag core/gate ghcr.io/<owner>/gate:latest && docker push`),
-  then point `GATE_IMAGE` at it. No source is vendored anywhere.
-- R5, build time: a full SYCL toolchain build takes tens of minutes.
-  CI timeouts and layer caching are set accordingly. Never build on
-  the deployment host while inference is serving.
+Release resolution uses GitHub release metadata and resolves a tag to its
+full commit. Every build records the source commit in image labels and
+tags. Manual refs must be release tags. Nightly llama follows prereleases
+until stable >=0.7.0 exists (v0.6.0 was already published on October 5,
+2026). Whisper follows stable releases >=1.9.5.
+Toolchain and driver updates remain deliberate Dockerfile changes.
+
+CI tests policy fixtures, the HTTP probe and Compose invariants. Runtime
+build workflows smoke-test the actual final images before publishing.
+Gate builds use the independently maintained source, not a vendored copy.
+No placeholder benchmark job or automatic stable promotion is included.
+
+## Pending acceptance
+
+Draft checks executed: Go tests and vet for the entrypoint and probe;
+release-policy fixture tests; live release/tag resolution; resolved Compose
+topology/portability assertions; actionlint; Dockerfile static checks for
+both runtime targets; and git diff whitespace checks.
+These do not establish image or GPU acceptance.
+
+1. Compile both targets and run final-image binary/probe smoke checks.
+2. Exercise Level Zero, SYCL adapter loading and IGC JIT on an isolated Intel GPU.
+3. Run llama coding/image fixtures and compare throughput with a pinned baseline.
+4. Run Whisper v1.9.5 transcription, audio decoding and optional VAD against the existing baseline.
+5. Verify gate startup, request routing, idle stops and disappearance of runtime DRM file descriptors.
+6. Record final size, SBOM and vulnerability results before selecting production digests.
+
+Do not perform GPU checks beside active production inference. Shell-free
+packaging is not a sandbox or a substitute for device/socket permissions.
+Base image tags and driver downloads are version-pinned but not yet
+digest/checksum-locked. Lock those inputs before calling builds reproducible
+or promoting a production image.

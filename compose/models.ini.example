@@ -1,0 +1,4 @@
+[example]
+model = /models/model.gguf
+ctx-size = 4096
+gpu-layers = all

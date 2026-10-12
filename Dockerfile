@@ -1,105 +1,109 @@
 # syntax=docker/dockerfile:1.7
-# llama_edge all-in-one: llama.cpp (SYCL) + whisper.cpp (SYCL) + gate.
-# Design and open risks: docs/architecture.md.
-# Every upstream input is a pinned ARG. CI fail-fasts on the deb URLs
-# before the long toolchain stages run.
-
 ARG ONEAPI_VERSION=2026.1.1-devel-ubuntu24.04
-ARG LLAMA_SHA=e937b17a2
-# Pin to a verified SHA after the first green whisper SYCL build.
-ARG WHISPER_REF=master
+ARG WHISPER_BACKEND=vulkan
+FROM docker.io/golang:1.25-bookworm AS probe-build
+WORKDIR /src
+COPY probe/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/probe .
+WORKDIR /launcher
+COPY launcher/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/whisper-entrypoint .
+
+FROM docker.io/intel/oneapi-toolkit:${ONEAPI_VERSION} AS toolchain
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG LEVEL_ZERO_VERSION=1.34.0
 ARG COMPUTE_RUNTIME_VERSION=26.35.39758.10
 ARG COMPUTE_RUNTIME_FULL=26.35.39758.10-0
-ARG IGC_VERSION=v2.41.5
+ARG IGC_VERSION=2.41.5
 ARG IGC_VERSION_FULL=2_2.41.5+22716
 ARG IGDGMM_VERSION=22.10.0
-# Local gate image. Publish it to a registry once, then override with
-#   --build-context gate-image=ghcr.io/<owner>/gate:latest
-# in CI. See docs/architecture.md R4.
-ARG GATE_IMAGE=core/gate
-
-# Pinned driver debs, downloaded once and shared by later stages.
-FROM docker.io/ubuntu:24.04 AS debs
-ARG LEVEL_ZERO_VERSION COMPUTE_RUNTIME_VERSION COMPUTE_RUNTIME_FULL
-ARG IGC_VERSION IGC_VERSION_FULL IGDGMM_VERSION
-WORKDIR /debs
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
-    && rm -rf /var/lib/apt/lists \
-    && wget -q "https://github.com/oneapi-src/level-zero/releases/download/v${LEVEL_ZERO_VERSION}/libze1_${LEVEL_ZERO_VERSION}+u24.04_amd64.deb" \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git cmake ninja-build python3 wget ca-certificates libssl-dev \
+    libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
+WORKDIR /tmp/debs
+RUN wget -q "https://github.com/oneapi-src/level-zero/releases/download/v${LEVEL_ZERO_VERSION}/libze1_${LEVEL_ZERO_VERSION}+u24.04_amd64.deb" \
     && wget -q "https://github.com/oneapi-src/level-zero/releases/download/v${LEVEL_ZERO_VERSION}/libze-dev_${LEVEL_ZERO_VERSION}+u24.04_amd64.deb" \
-    && wget -q "https://github.com/intel/intel-graphics-compiler/releases/download/${IGC_VERSION}/intel-igc-core-${IGC_VERSION_FULL}_amd64.deb" \
-    && wget -q "https://github.com/intel/intel-graphics-compiler/releases/download/${IGC_VERSION}/intel-igc-opencl-${IGC_VERSION_FULL}_amd64.deb" \
+    && wget -q "https://github.com/intel/intel-graphics-compiler/releases/download/v${IGC_VERSION}/intel-igc-core-${IGC_VERSION_FULL}_amd64.deb" \
+    && wget -q "https://github.com/intel/intel-graphics-compiler/releases/download/v${IGC_VERSION}/intel-igc-opencl-${IGC_VERSION_FULL}_amd64.deb" \
     && wget -q "https://github.com/intel/compute-runtime/releases/download/${COMPUTE_RUNTIME_VERSION}/intel-ocloc_${COMPUTE_RUNTIME_FULL}_amd64.deb" \
     && wget -q "https://github.com/intel/compute-runtime/releases/download/${COMPUTE_RUNTIME_VERSION}/intel-opencl-icd_${COMPUTE_RUNTIME_FULL}_amd64.deb" \
     && wget -q "https://github.com/intel/compute-runtime/releases/download/${COMPUTE_RUNTIME_VERSION}/libigdgmm12_${IGDGMM_VERSION}_amd64.deb" \
-    && wget -q "https://github.com/intel/compute-runtime/releases/download/${COMPUTE_RUNTIME_VERSION}/libze-intel-gpu1_${COMPUTE_RUNTIME_FULL}_amd64.deb"
-
-# Toolchain plus pinned driver stack for both builds.
-FROM docker.io/intel/oneapi-toolkit:${ONEAPI_VERSION} AS toolchain
-COPY --from=debs /debs/*.deb /tmp/debs/
-RUN apt-get update \
-    && apt-get install -y git libssl-dev \
-    && dpkg --install /tmp/debs/*.deb \
-    && rm -rf /tmp/debs /var/lib/apt/lists
+    && wget -q "https://github.com/intel/compute-runtime/releases/download/${COMPUTE_RUNTIME_VERSION}/libze-intel-gpu1_${COMPUTE_RUNTIME_FULL}_amd64.deb" \
+    && apt-get -o Dpkg::Options::="--force-overwrite" install -y ./*.deb \
+    && rm -rf /tmp/debs /var/lib/apt/lists/*
+COPY scripts/collect-rootfs.py /collect-rootfs.py
 
 FROM toolchain AS llama-build
-ARG LLAMA_SHA
-WORKDIR /src/llama.cpp
-RUN git init -q . && git remote add origin https://github.com/ggml-org/llama.cpp.git \
-    && git fetch -q --depth 1 origin "${LLAMA_SHA}" && git checkout -q FETCH_HEAD
-RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_SYCL=ON \
-        -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
-        -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
-        -DGGML_SYCL_F16=ON -DLLAMA_BUILD_TESTS=OFF \
-    && cmake --build build --config Release -j$(nproc) --target llama-server
-RUN mkdir -p /out/lib && cp build/bin/llama-server /out/ \
-    && find build -name "*.so*" -exec cp -P {} /out/lib \;
+ARG LLAMA_SHA=cbe28bb3cb0758f0c566a9a3561766821aeb0748
+WORKDIR /src
+RUN git init -q && git remote add origin https://github.com/ggml-org/llama.cpp.git \
+    && git fetch --depth 1 origin "${LLAMA_SHA}" && git checkout -q FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${LLAMA_SHA}"
+RUN source /opt/intel/oneapi/setvars.sh \
+    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
+      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_NATIVE=OFF \
+      -DLLAMA_BUILD_TESTS=OFF -DLLAMA_CURL=OFF \
+    && cmake --build build --target llama-server --parallel 2 \
+    && python3 /collect-rootfs.py build/bin llama-server /rootfs
 
-FROM toolchain AS whisper-build
-ARG WHISPER_REF
-WORKDIR /src/whisper.cpp
-RUN git init -q . && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
-    && git fetch -q --depth 1 origin "${WHISPER_REF}" && git checkout -q FETCH_HEAD
-RUN cmake -B build -DWHISPER_SYCL=ON -DWHISPER_SYCL_F16=ON \
-        -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
-    && cmake --build build --config Release -j$(nproc) --target whisper-server
-RUN mkdir -p /out/lib && cp build/bin/whisper-server /out/ \
-    && find build -name "*.so*" -exec cp -P {} /out/lib \;
+FROM toolchain AS whisper-sycl-build
+# CI overrides this with the resolved release SHA. Local builds resolve the tag.
+ARG WHISPER_REF=v1.9.5
+WORKDIR /src
+RUN git init -q && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
+    && git fetch --depth 1 origin "${WHISPER_REF}" && git checkout -q FETCH_HEAD
+RUN source /opt/intel/oneapi/setvars.sh \
+    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
+      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_NATIVE=OFF \
+      -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_IS_DEV=OFF \
+      -DWHISPER_COMMON_FFMPEG=ON \
+    && cmake --build build --target whisper-server --parallel 2 \
+    && python3 /collect-rootfs.py build/bin whisper-server /rootfs \
+    && mkdir -p /rootfs/app/public && cp -a examples/server/public/. /rootfs/app/public/
 
-# Static gate binary from the existing local image. No source duplication.
-FROM ${GATE_IMAGE} AS gate-src
+FROM docker.io/ubuntu:24.04 AS whisper-vulkan-build
+ARG WHISPER_REF=v1.9.5
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git cmake ninja-build build-essential python3 ca-certificates \
+    libvulkan-dev mesa-vulkan-drivers glslc glslang-tools \
+    libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/collect-rootfs.py /collect-rootfs.py
+WORKDIR /src
+RUN git init -q && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
+    && git fetch --depth 1 origin "${WHISPER_REF}" && git checkout -q FETCH_HEAD
+RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DWHISPER_BUILD_TESTS=OFF \
+      -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_COMMON_FFMPEG=ON \
+    && cmake --build build --target whisper-server --parallel 2 \
+    && python3 /collect-rootfs.py build/bin whisper-server /rootfs vulkan \
+    && mkdir -p /rootfs/app/public && cp -a examples/server/public/. /rootfs/app/public/
 
-# Debian stage: install the driver debs, collect exactly the runtime libs
-# the two servers load, plus ffmpeg for whisper audio conversion.
-FROM docker.io/ubuntu:24.04 AS rootfs
-COPY --from=debs /debs/*.deb /tmp/debs/
-COPY --from=llama-build /out/ /pkg/llama/
-COPY --from=whisper-build /out/ /pkg/whisper/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 ffmpeg binutils \
-    && dpkg --install /tmp/debs/*.deb \
-    && rm -rf /tmp/debs /var/lib/apt/lists \
-    && mkdir -p /rootfs/app /rootfs/app/lib \
-    && cp /pkg/llama/llama-server /pkg/whisper/whisper-server /rootfs/app/ \
-    && cp -P /pkg/llama/lib/*.so* /pkg/whisper/lib/*.so* /rootfs/app/lib/ 2>/dev/null; true \
-    && for bin in /rootfs/app/llama-server /rootfs/app/whisper-server; do \
-           ldd "$bin" | awk '{print $3}' | grep -E '^/' ; \
-       done | sort -u | while read -r lib; do \
-           mkdir -p "/rootfs$(dirname "$lib")" && cp -P "$lib" "/rootfs$lib"; \
-       done \
-    && for pattern in 'libze*' 'libig*' 'libocloc*' 'libsycl*' 'libur_*' 'libsvml*' 'libirng*' 'libimf*'; do \
-           find /usr/lib/x86_64-linux-gnu /opt/intel -name "$pattern" \
-               -exec sh -c 'mkdir -p "/rootfs$(dirname "$1")" && cp -P "$1" "/rootfs$1"' _ {} \; 2>/dev/null; \
-       done; true
+FROM whisper-${WHISPER_BACKEND}-build AS whisper-selected
 
-# Final stage: distroless C++ runtime. No shell, no package manager.
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
-COPY --from=rootfs /rootfs/ /
-COPY --from=gate-src /app/gate /app/gate
-ENV LD_LIBRARY_PATH=/app/lib
+FROM scratch AS llama_runtime
+ARG LLAMA_SHA=cbe28bb3cb0758f0c566a9a3561766821aeb0748
+LABEL org.opencontainers.image.source="https://github.com/ggml-org/llama.cpp" \
+      org.opencontainers.image.revision="${LLAMA_SHA}"
+COPY --from=llama-build /rootfs/ /
+COPY --from=probe-build /out/probe /app/probe
+ENV HOME=/home/runtime LD_LIBRARY_PATH=/app/lib:/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/mkl/latest/lib/intel64:/opt/intel/oneapi/tbb/latest/lib \
+    ONEAPI_DEVICE_SELECTOR=level_zero:0
+USER 1000:1000
 WORKDIR /app
-# Phase 1 roles override the entrypoint per service (see compose/).
-# The gate role keeps its self healthcheck; server roles run without one
-# because the gate performs HTTP readiness waits itself.
-ENTRYPOINT ["/app/gate"]
+ENTRYPOINT ["/app/llama-server"]
+
+FROM scratch AS whisper_runtime
+ARG WHISPER_REF=v1.9.5
+LABEL org.opencontainers.image.source="https://github.com/ggml-org/whisper.cpp" \
+      org.opencontainers.image.revision="${WHISPER_REF}"
+COPY --from=whisper-selected /rootfs/ /
+COPY --from=probe-build /out/probe /app/probe
+COPY --from=probe-build /out/whisper-entrypoint /app/whisper-entrypoint
+ENV HOME=/home/runtime LD_LIBRARY_PATH=/app/lib:/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/mkl/latest/lib/intel64:/opt/intel/oneapi/tbb/latest/lib \
+    ONEAPI_DEVICE_SELECTOR=level_zero:0
+USER 1000:1000
+WORKDIR /app
+ENTRYPOINT ["/app/whisper-entrypoint"]
