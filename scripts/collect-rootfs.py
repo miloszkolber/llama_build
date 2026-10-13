@@ -13,12 +13,15 @@ def collect(bindir, binary, root, backend="sycl"):
     app = root / "app"
     app.mkdir(parents=True)
     copied = []
+    library_dirs = set()
 
     def copy(src, destination):
         dst = root / str(destination).lstrip("/")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst, follow_symlinks=True)
         copied.append((Path(src), dst))
+        if ".so" in Path(src).name:
+            library_dirs.add("/" + str(dst.parent.relative_to(root)))
 
     copy(Path(bindir) / binary, "/app/" + binary)
     for lib in Path(bindir).glob("*.so*"):
@@ -51,6 +54,17 @@ def collect(bindir, binary, root, backend="sycl"):
             raise RuntimeError("missing Intel runtime libraries: " + pattern)
         for lib in matches:
             copy(lib, lib)
+    if backend == "sycl":
+        # ICD drivers are loaded by filename, not linked into libOpenCL.
+        for icd in Path("/etc/OpenCL/vendors").glob("*.icd"):
+            for line in icd.read_text().splitlines():
+                name = line.strip()
+                if not name or name.startswith("#"):
+                    continue
+                driver = Path(name)
+                if not driver.is_absolute() or not driver.is_file():
+                    raise RuntimeError("missing or unsupported OpenCL ICD target: " + name)
+                copy(driver, str(driver))
 
     env = dict(os.environ)
     env["LD_LIBRARY_PATH"] = ":".join([str(Path(bindir).resolve()), *runtime_dirs,
@@ -86,6 +100,9 @@ def collect(bindir, binary, root, backend="sycl"):
     (root / "etc/passwd").write_text("runtime:x:1000:1000:runtime:/home/runtime:/nonexistent\n")
     (root / "etc/group").write_text("runtime:x:1000:\n")
     (root / "etc/nsswitch.conf").write_text("hosts: files dns\n")
+    # oneAPI dependencies can live outside the standard loader search paths.
+    (root / "etc/ld.so.conf").write_text("\n".join(sorted(library_dirs)) + "\n")
+    subprocess.run(["ldconfig", "-r", str(root)], check=True, capture_output=True, text=True)
     for path in ["tmp", "home/runtime", "home/runtime/.cache"]:
         directory = root / path
         directory.mkdir(parents=True, exist_ok=True)
