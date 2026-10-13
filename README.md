@@ -3,6 +3,7 @@
 Independent, shell-free inference images published to GHCR as `latest`:
 `gate`, `llama_runtime` (Intel SYCL, no UI), and `whisper_runtime` (Vulkan).
 Gate starts/stops separate runtime containers so idle GPU access is released.
+Behavior changes follow the [spec-driven workflow](openspec/README.md#working-a-change).
 
 ## Use
 
@@ -51,3 +52,7 @@ Gate is adapted from toolkit commit `35aed1c39fac35c04b4aac673f7b584f8b69caae`.
 Whisper links FFmpeg libraries; its shell-based `--convert` option is not
 supported. GPU performance, transcription fidelity and idle DRM release
 require separate acceptance tests. Build checks alone do not establish parity.
+
+## Documentation
+
+[`openspec/`](openspec/README.md) is the single documentation and planning tree: implemented [contracts](openspec/specs/), scoped [changes](openspec/changes/) and the [deferred backlog](openspec/backlog.md). Start at [`openspec/README.md`](openspec/README.md).
