@@ -33,7 +33,7 @@ func arguments(getenv func(string) string, stat func(string) (os.FileInfo, error
 		"--port", port, "--model", model, "--threads", threads,
 		"--language", value("WHISPER_LANGUAGE", "auto"),
 		"--inference-path", value("WHISPER_INFERENCE_PATH", "/v1/audio/transcriptions"),
-		"--no-fallback", "--flash-attn", "--public", "/app/public", "--tmp-dir", "/tmp"}
+		"--no-fallback", "--flash-attn", "--tmp-dir", "/tmp"}
 	// Preserve the existing shell condition: enable VAD only with a nonempty file.
 	if getenv("WHISPER_VAD_ENABLED") == "1" {
 		vad := getenv("WHISPER_VAD_MODEL")

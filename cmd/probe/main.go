@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -28,7 +29,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: probe URL")
 		os.Exit(2)
 	}
-	if err := probe(os.Args[1]); err != nil {
+	url := os.Args[1]
+	if url == "llama" || url == "whisper" {
+		key, port, path := "LLAMA_ARG_PORT", "9668", "/health"
+		if url == "whisper" {
+			key, port, path = "WHISPER_PORT", "9670", "/health"
+		}
+		if value := os.Getenv(key); value != "" {
+			port = value
+		}
+		url = "http://" + net.JoinHostPort("127.0.0.1", port) + path
+	}
+	if err := probe(url); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

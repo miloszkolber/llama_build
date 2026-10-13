@@ -17,7 +17,7 @@ func TestArguments(t *testing.T) {
 	}
 	want := []string{"/app/whisper-server", "--host", "127.0.0.1", "--port", "9670", "--model", model,
 		"--threads", "4", "--language", "auto", "--inference-path", "/v1/audio/transcriptions",
-		"--no-fallback", "--flash-attn", "--public", "/app/public", "--tmp-dir", "/tmp"}
+		"--no-fallback", "--flash-attn", "--tmp-dir", "/tmp"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("got %q", args)
 	}

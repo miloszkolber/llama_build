@@ -1,0 +1,131 @@
+name: Build images
+on:
+  push:
+    paths-ignore: ['README.md']
+  pull_request:
+    paths-ignore: ['README.md']
+  schedule:
+    - cron: '0 2 * * *'
+      timezone: Europe/Warsaw
+    - cron: '0 2 * * 1'
+      timezone: Europe/Warsaw
+  workflow_dispatch:
+    inputs:
+      image:
+        type: choice
+        options: [all, gate, llama, whisper]
+        default: all
+      release_tag:
+        description: 'Optional upstream release tag; select llama or whisper, not all'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: build-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}-${{ inputs.image }}
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select independent builds
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          IMAGE: ${{ inputs.image || 'all' }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          image = os.environ['IMAGE']
+          if os.environ['EVENT'] == 'schedule':
+              image = 'whisper' if os.environ['SCHEDULE'] == '0 2 * * 1' else 'llama'
+          if os.environ['RELEASE_TAG'] and image not in {'llama', 'whisper'}:
+              raise SystemExit('release_tag requires selecting llama or whisper')
+          images = ['gate', 'llama', 'whisper'] if image == 'all' else [image]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps({'component': images}) + '\n')
+          PY
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test ./... && go vet ./...
+      - run: python3 -m unittest discover -s tests
+      - name: Compose syntax
+        run: |
+          cp compose/.env.example compose/.env
+          cp compose/models.ini.example compose/models.ini
+          docker compose -f compose/docker-compose.yaml --profile runtime config --quiet
+      - uses: docker://rhysd/actionlint:1.7.12
+  build:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.check.outputs.matrix) }}
+    concurrency:
+      group: image-${{ matrix.component }}-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve source and dependencies
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ matrix.component }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 scripts/resolve.py "$COMPONENT" --tag "$RELEASE_TAG"
+      - name: Free build space on the disposable hosted runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+      - uses: docker/setup-buildx-action@v3
+      - name: Build once for testing and publication
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.component }}.Dockerfile
+          pull: true
+          platforms: linux/amd64
+          load: true
+          tags: build-test:local
+          build-args: |
+            SOURCE_SHA=${{ steps.source.outputs.sha }}
+            BUILD_DATE=${{ steps.source.outputs.date }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=min,ignore-error=true,scope={0}', matrix.component) || '' }}
+      - name: Final-image smoke check
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if [ "$COMPONENT" = gate ]; then
+            docker run --rm build-test:local --health
+          else
+            docker run --rm build-test:local --help
+          fi
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish exactly the tested image
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          name="$COMPONENT"
+          if [ "$name" != gate ]; then name="${name}_runtime"; fi
+          image="ghcr.io/${OWNER,,}/$name:latest"
+          docker tag build-test:local "$image"
+          docker push "$image"

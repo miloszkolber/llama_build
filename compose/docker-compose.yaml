@@ -1,76 +1,63 @@
 services:
   llama-runtime:
-    image: ${LLAMA_IMAGE:-llama_runtime}
-    build:
-      context: ..
-      target: llama_runtime
+    image: ${REGISTRY}/llama_runtime:latest
+    pull_policy: always
     container_name: llama-runtime
     restart: "no"
     profiles: [runtime]
     network_mode: host
-    env_file: [llama.env]
-    environment:
-      LLAMA_ARG_PORT: ${LLAMA_PORT:-9668}
-    group_add: ["${RENDER_GID:?Set the DRM render group ID}"]
+    env_file: .env
+    group_add: ["${RENDER_GID}"]
     command: ["--no-warmup"]
-    volumes:
-      - ${MODELS_DIR:?Set the model directory}:/models:ro
-      - ${LLAMA_CACHE_DIR:?Set the cache directory}:/home/runtime/.cache
-      - ./models.ini:/models.ini:ro
-    devices:
-      - ${DRI_RENDER:?Set the render device}:${DRI_RENDER}
+    environment:
+      XDG_CACHE_HOME: /home/runtime/.cache
+    read_only: true
+    tmpfs: [/tmp]
     healthcheck:
-      test: ["CMD", "/app/probe", "http://127.0.0.1:${LLAMA_PORT:-9668}/health"]
+      test: ["CMD", "/app/probe", "llama"]
       interval: 60s
       timeout: 5s
       retries: 3
       start_period: 10s
+    volumes:
+      - ${MODELS_DIR}:/models:ro
+      - ${CACHE_DIR}:/home/runtime/.cache
+      - ./models.ini:/models.ini:ro
+    devices: ["${DRI_RENDER}:${DRI_RENDER}"]
 
   whisper-runtime:
-    image: ${WHISPER_IMAGE:-whisper_runtime}
-    build:
-      context: ..
-      target: whisper_runtime
-      args:
-        WHISPER_BACKEND: ${WHISPER_BACKEND:-vulkan}
+    image: ${REGISTRY}/whisper_runtime:latest
+    pull_policy: always
     container_name: whisper-runtime
     restart: "no"
     profiles: [runtime]
     network_mode: host
-    group_add: ["${RENDER_GID:?Set the DRM render group ID}"]
-    env_file: [whisper.env]
-    environment:
-      WHISPER_PORT: ${WHISPER_PORT:-9670}
-    volumes:
-      - ${MODELS_DIR:?Set the model directory}:/models:ro
-    devices:
-      - ${DRI_RENDER:?Set the render device}:${DRI_RENDER}
+    env_file: .env
+    group_add: ["${RENDER_GID}"]
+    read_only: true
+    tmpfs: [/tmp]
     healthcheck:
-      test: ["CMD", "/app/probe", "http://127.0.0.1:${WHISPER_PORT:-9670}/"]
+      test: ["CMD", "/app/probe", "whisper"]
       interval: 60s
       timeout: 5s
       retries: 3
       start_period: 15s
+    volumes: ["${MODELS_DIR}:/models:ro"]
+    devices: ["${DRI_RENDER}:${DRI_RENDER}"]
 
   llama:
-    image: ${GATE_IMAGE:-gate}
-    build:
-      context: ${GATE_CONTEXT:-../../gate}
-      dockerfile: ${GATE_DOCKERFILE:-Dockerfile}
+    image: ${REGISTRY}/gate:latest
+    pull_policy: always
     container_name: llama
     restart: always
     network_mode: host
-    environment:
-      IDLE_TIMEOUT: "300"
-      STARTUP_TIMEOUT: "180"
-    group_add: ["${DOCKER_GID:?Set the Docker socket group ID}"]
-    command: ["--config", "/etc/gate/config.json"]
-    volumes:
-      - ./gate.json:/etc/gate/config.json:ro
-      - /var/run/docker.sock:/var/run/docker.sock:rw
+    env_file: .env
+    group_add: ["${DOCKER_GID}"]
+    read_only: true
     healthcheck:
       test: ["CMD", "/app/gate", "--health"]
       interval: 60s
       timeout: 5s
       retries: 3
       start_period: 10s
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:rw"]

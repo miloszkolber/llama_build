@@ -2,8 +2,7 @@
 build/
 out/
 compose/.env
-compose/llama.env
-compose/whisper.env
+.build/
 compose/models.ini
 compose/models/
 compose/cache/

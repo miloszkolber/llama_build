@@ -11,7 +11,7 @@ import sys
 def collect(bindir, binary, root, backend="sycl"):
     root = Path(root)
     app = root / "app"
-    (app / "lib").mkdir(parents=True)
+    app.mkdir(parents=True)
     copied = []
 
     def copy(src, destination):
@@ -22,7 +22,7 @@ def collect(bindir, binary, root, backend="sycl"):
 
     copy(Path(bindir) / binary, "/app/" + binary)
     for lib in Path(bindir).glob("*.so*"):
-        copy(lib, "/app/lib/" + lib.name)
+        copy(lib, "/app/" + lib.name)
     runtime_dirs = []
     if backend == "sycl":
         runtime_dirs = ["/opt/intel/oneapi/compiler/latest/lib", "/opt/intel/oneapi/mkl/latest/lib"]
@@ -31,7 +31,13 @@ def collect(bindir, binary, root, backend="sycl"):
     for directory in runtime_dirs:
         if not Path(directory).is_dir():
             raise RuntimeError("missing oneAPI runtime directory: " + directory)
-        for base, _, files in os.walk(directory, followlinks=True):
+        for base, directories, files in os.walk(directory, followlinks=False):
+            for name in directories:
+                src = Path(base) / name
+                if src.is_symlink():
+                    dst = root / str(src).lstrip("/")
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    dst.symlink_to(os.readlink(src), target_is_directory=True)
             for name in files:
                 src = Path(base) / name
                 if src.suffix in {".a", ".o"}:

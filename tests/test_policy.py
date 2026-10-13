@@ -1,9 +1,8 @@
 import importlib.util
-from datetime import datetime
 from pathlib import Path
 import unittest
 
-spec = importlib.util.spec_from_file_location("policy", Path(__file__).parents[1] / "scripts/release-policy.py")
+spec = importlib.util.spec_from_file_location("policy", Path(__file__).parents[1] / "scripts/resolve.py")
 policy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(policy)
 
@@ -29,10 +28,3 @@ class PolicyTests(unittest.TestCase):
             policy.select("whisper", [release("v1.9.4")])
         with self.assertRaises(ValueError):
             policy.select("whisper", releases, "master")
-
-    def test_warsaw_schedule(self):
-        for date in ["2026-07-01T00:30:00+00:00", "2026-12-01T01:30:00+00:00"]:
-            self.assertTrue(policy.due("schedule", datetime.fromisoformat(date)))
-        for date in ["2026-07-01T01:30:00+00:00", "2026-12-01T00:30:00+00:00"]:
-            self.assertFalse(policy.due("schedule", datetime.fromisoformat(date)))
-        self.assertTrue(policy.due("workflow_dispatch", datetime.fromisoformat("2026-07-01T12:00:00+00:00")))

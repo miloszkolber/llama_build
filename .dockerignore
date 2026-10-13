@@ -6,5 +6,5 @@ README.md
 .gitignore
 .dockerignore
 tests
-gate
 __pycache__
+**/__pycache__

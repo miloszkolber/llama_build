@@ -1,13 +1,14 @@
 """Resolve a versioned upstream release and its commit for image builds."""
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 import re
 import subprocess
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
+from pathlib import Path
+import time
 
 
 def version(tag):
@@ -39,16 +40,45 @@ def select(component, releases, explicit=""):
     raise ValueError("no eligible upstream release")
 
 
-def due(event, now):
-    return event != "schedule" or now.astimezone(ZoneInfo("Europe/Warsaw")).hour == 2
-
-
 def api(path):
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "llama_build"}
     if os.getenv("GH_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
-    with urlopen(Request("https://api.github.com/" + path, headers=headers), timeout=30) as response:
-        return json.load(response)
+    for attempt in range(3):
+        try:
+            with urlopen(Request("https://api.github.com/" + path, headers=headers), timeout=30) as response:
+                return json.load(response)
+        except HTTPError as err:
+            if err.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
+
+
+def drivers():
+    compute = api("repos/intel/compute-runtime/releases/latest")
+    # Follow the compiler version used by the runtime, not an unrelated latest IGC.
+    match = re.search(r"intel/intel-graphics-compiler/releases/tag/([^\s)]+)", compute["body"])
+    if not match:
+        raise ValueError("compute-runtime release does not identify its IGC dependency")
+    igc = api("repos/intel/intel-graphics-compiler/releases/tags/" + match[1])
+    loader = api("repos/oneapi-src/level-zero/releases/latest")
+    packages = []
+    groups = [
+        (compute, [r"intel-ocloc_.*_amd64.deb", r"intel-opencl-icd_.*_amd64.deb", r"libigdgmm\d+_.*_amd64.deb", r"libze-intel-gpu1_.*_amd64.deb"]),
+        (igc, [r"intel-igc-core-\d+_.*_amd64.deb", r"intel-igc-opencl-\d+_.*_amd64.deb"]),
+        (loader, [r"(?:libze1|level-zero)_.*u24\.04_amd64.deb", r"(?:libze-dev|level-zero-devel)_.*u24\.04_amd64.deb"]),
+    ]
+    for release, patterns in groups:
+        for pattern in patterns:
+            matches = [a for a in release["assets"] if re.fullmatch(pattern, a["name"])]
+            if len(matches) != 1:
+                raise ValueError(f"expected one asset matching {pattern} in {release['tag_name']}")
+            asset = matches[0]
+            digest = asset.get("digest", "")
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest or ""):
+                raise ValueError("asset has no SHA256 digest: " + asset["name"])
+            packages.append({"url": asset["browser_download_url"], "sha256": digest[7:]})
+    return {"compute": compute["tag_name"], "igc": igc["tag_name"], "level_zero": loader["tag_name"], "packages": packages}
 
 
 def emit(values):
@@ -62,12 +92,15 @@ def emit(values):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("component", choices=["llama", "whisper"])
+    parser.add_argument("component", choices=["gate", "llama", "whisper"])
     parser.add_argument("--tag", default="")
-    parser.add_argument("--event", default="workflow_dispatch")
     args = parser.parse_args()
-    if not due(args.event, datetime.now(ZoneInfo("UTC"))):
-        emit({"build": "false"})
+    if args.tag and not re.fullmatch(r"(?:b\d+|v?\d+\.\d+\.\d+)", args.tag):
+        parser.error("override must be a release tag")
+    if args.component == "gate":
+        if args.tag:
+            parser.error("gate builds this repository, not an upstream release")
+        emit({"sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "tag": "local"})
         return
     repo = "ggml-org/" + args.component + ".cpp"
     releases = api(f"repos/{repo}/releases?per_page=100")
@@ -86,7 +119,10 @@ def main():
     sha = values.get("refs/tags/" + tag + "^{}", values.get("refs/tags/" + tag))
     if not sha or not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("release tag did not resolve to a commit")
-    emit({"build": "true", "tag": tag, "sha": sha})
+    if args.component == "llama":
+        Path(".build").mkdir(exist_ok=True)
+        Path(".build/drivers.json").write_text(json.dumps(drivers(), indent=2) + "\n")
+    emit({"tag": tag, "sha": sha, "date": datetime.now(timezone.utc).date().isoformat()})
 
 
 if __name__ == "__main__":
