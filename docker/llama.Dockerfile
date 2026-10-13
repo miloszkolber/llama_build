@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-bookworm AS helper
+FROM golang:1.27-bookworm AS helper
 WORKDIR /src
 COPY go.mod ./
 COPY cmd/probe/ cmd/probe/

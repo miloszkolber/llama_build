@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-bookworm AS helper
+FROM golang:1.27-bookworm AS helper
 WORKDIR /src
 COPY go.mod ./
 COPY cmd/probe/ cmd/probe/
@@ -7,7 +7,7 @@ COPY cmd/whisper/ cmd/whisper/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /probe ./cmd/probe \
     && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /whisper-entrypoint ./cmd/whisper
 
-FROM ubuntu:24.04 AS build
+FROM ubuntu:26.04 AS build
 ARG SOURCE_SHA
 ARG BUILD_DATE
 RUN apt-get update && apt-get install -y --no-install-recommends \
