@@ -7,3 +7,4 @@ compose/models.ini
 compose/models/
 compose/cache/
 __pycache__/
+favicon.svg
