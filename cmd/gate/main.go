@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,8 +12,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,10 +20,7 @@ import (
 )
 
 // --- config.go ---
-const DefaultConfigPath = "/etc/gate/config.json"
-
 type Config struct {
-	Version                      int    `json:"version"`
 	Profile                      string `json:"profile"`
 	DockerSocket                 string `json:"docker_socket"`
 	IdleTimeoutSeconds           int    `json:"idle_timeout_seconds"`
@@ -48,6 +42,8 @@ type BackendConfig struct {
 	HealthPath   string `json:"health_path"`
 }
 type PortHandoffConfig struct {
+	GateName         string
+	ListenHost       string
 	RuntimeName      string   `json:"runtime_name"`
 	TCPPorts         []int    `json:"tcp_ports"`
 	UDPPorts         []int    `json:"udp_ports"`
@@ -60,121 +56,6 @@ func (c Config) StartupTimeout() time.Duration {
 }
 func (c Config) ConnectionIdleTimeout() time.Duration {
 	return time.Duration(c.ConnectionIdleTimeoutSeconds) * time.Second
-}
-
-func LoadConfig(path string) (Config, error) {
-	b, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return Config{}, fmt.Errorf("read config: %w", err)
-	}
-	return ParseConfig(b)
-}
-
-func ParseConfig(data []byte) (Config, error) {
-	var root map[string]json.RawMessage
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if err := dec.Decode(&root); err != nil {
-		return Config{}, fmt.Errorf("decode config: %w", err)
-	}
-	if err := requireEOF(dec); err != nil {
-		return Config{}, err
-	}
-	profile := stringValue(root["profile"])
-	allowed := map[string]bool{"version": true, "profile": true, "docker_socket": true, "idle_timeout_seconds": true, "startup_timeout_seconds": true, "connection_idle_timeout_seconds": true}
-	block := ""
-	switch profile {
-	case "persistent-proxy":
-		block = "persistent_proxy"
-	case "port-handoff":
-		block = "port_handoff"
-	default:
-		return Config{}, fmt.Errorf("config profile must be persistent-proxy or port-handoff")
-	}
-	allowed[block] = true
-	for key := range root {
-		if !allowed[key] {
-			return Config{}, fmt.Errorf("unknown or incompatible config field %q", key)
-		}
-	}
-	for _, key := range []string{"version", "profile", "idle_timeout_seconds", "startup_timeout_seconds", "connection_idle_timeout_seconds", block} {
-		if _, ok := root[key]; !ok {
-			return Config{}, fmt.Errorf("missing config field %q", key)
-		}
-	}
-	var base struct {
-		Version                      int             `json:"version"`
-		Profile                      string          `json:"profile"`
-		DockerSocket                 string          `json:"docker_socket"`
-		IdleTimeoutSeconds           int             `json:"idle_timeout_seconds"`
-		StartupTimeoutSeconds        int             `json:"startup_timeout_seconds"`
-		ConnectionIdleTimeoutSeconds int             `json:"connection_idle_timeout_seconds"`
-		PersistentProxy              json.RawMessage `json:"persistent_proxy"`
-		PortHandoff                  json.RawMessage `json:"port_handoff"`
-	}
-	base.DockerSocket = "/var/run/docker.sock"
-	if err := decodeObject(data, &base); err != nil {
-		return Config{}, err
-	}
-	c := Config{Version: base.Version, Profile: base.Profile, DockerSocket: base.DockerSocket, IdleTimeoutSeconds: base.IdleTimeoutSeconds, StartupTimeoutSeconds: base.StartupTimeoutSeconds, ConnectionIdleTimeoutSeconds: base.ConnectionIdleTimeoutSeconds}
-	if c.Version != 1 {
-		return Config{}, fmt.Errorf("unsupported config version %d", c.Version)
-	}
-	if raw, ok := root["docker_socket"]; ok {
-		if err := json.Unmarshal(raw, &c.DockerSocket); err != nil {
-			return Config{}, fmt.Errorf("docker_socket: %w", err)
-		}
-	}
-	if c.DockerSocket == "" {
-		return Config{}, fmt.Errorf("docker_socket must not be empty")
-	}
-	if !validTimeoutSeconds(c.IdleTimeoutSeconds) || !validTimeoutSeconds(c.StartupTimeoutSeconds) || !validTimeoutSeconds(c.ConnectionIdleTimeoutSeconds) {
-		return Config{}, fmt.Errorf("timeout values must be positive integer seconds")
-	}
-	if profile == "persistent-proxy" {
-		var p PersistentProxyConfig
-		if err := decodeObject(root[block], &p); err != nil {
-			return Config{}, fmt.Errorf("%s: %w", block, err)
-		}
-		c.PersistentProxy = &p
-		if len(p.Backends) == 0 {
-			return Config{}, fmt.Errorf("persistent_proxy.backends must not be empty")
-		}
-		names, runtimes, ports := map[string]bool{}, map[string]bool{}, map[int]bool{}
-		for i := range p.Backends {
-			b := &p.Backends[i]
-			if b.ListenHost == "" {
-				b.ListenHost = "0.0.0.0"
-			}
-			if !dockerName(b.Name) || !dockerName(b.RuntimeName) || b.ListenPort < 1 || b.ListenPort > 65535 || b.UpstreamPort < 1 || b.UpstreamPort > 65535 || !validHealthPath(b.HealthPath) {
-				return Config{}, fmt.Errorf("invalid persistent backend %q", b.Name)
-			}
-			if names[b.Name] || runtimes[b.RuntimeName] || ports[b.ListenPort] {
-				return Config{}, fmt.Errorf("duplicate backend name, runtime name, or listener port %q", b.Name)
-			}
-			names[b.Name], runtimes[b.RuntimeName], ports[b.ListenPort] = true, true, true
-		}
-	} else {
-		var p PortHandoffConfig
-		if err := decodeObject(root[block], &p); err != nil {
-			return Config{}, fmt.Errorf("%s: %w", block, err)
-		}
-		c.PortHandoff = &p
-		if !dockerName(p.RuntimeName) || len(p.TCPPorts) == 0 || len(p.UDPPorts) == 0 || len(p.ActivityPrefixes) == 0 {
-			return Config{}, fmt.Errorf("port_handoff requires runtime_name, tcp_ports, udp_ports, and activity_prefixes")
-		}
-		if err := validPorts(p.TCPPorts); err != nil {
-			return Config{}, err
-		}
-		if err := validPorts(p.UDPPorts); err != nil {
-			return Config{}, err
-		}
-		for _, prefix := range p.ActivityPrefixes {
-			if prefix == "" {
-				return Config{}, fmt.Errorf("activity prefix must not be empty")
-			}
-		}
-	}
-	return c, nil
 }
 
 func validTimeoutSeconds(seconds int) bool {
@@ -194,6 +75,10 @@ func validPorts(list []int) error {
 
 func dockerName(name string) bool {
 	if name == "" {
+		return false
+	}
+	first := name[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || (first >= '0' && first <= '9')) {
 		return false
 	}
 	for _, r := range name {
@@ -216,48 +101,7 @@ func validHealthPath(path string) bool {
 	return true
 }
 
-func decodeObject(data []byte, target any) error {
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(target); err != nil {
-		return err
-	}
-	return requireEOF(d)
-}
-func requireEOF(d *json.Decoder) error {
-	var extra any
-	if err := d.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("trailing JSON value")
-		}
-		return fmt.Errorf("trailing config data: %w", err)
-	}
-	return nil
-}
-func stringValue(raw json.RawMessage) string {
-	var value string
-	_ = json.Unmarshal(raw, &value)
-	return value
-}
-
 // --- common.go ---
-func timeoutFromEnv(name string, fallback time.Duration) time.Duration {
-	raw, ok := os.LookupEnv(name)
-	if !ok || raw == "" {
-		return fallback
-	}
-	seconds, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || seconds <= 0 || seconds > int64((1<<63-1)/int64(time.Second)) {
-		log.Printf("invalid %s=%q, using %s", name, raw, fallback)
-		return fallback
-	}
-	return time.Duration(seconds) * time.Second
-}
-func ApplyEnv(c Config) Config {
-	c.IdleTimeoutSeconds = int(timeoutFromEnv("IDLE_TIMEOUT", c.IdleTimeout()).Seconds())
-	c.StartupTimeoutSeconds = int(timeoutFromEnv("STARTUP_TIMEOUT", c.StartupTimeout()).Seconds())
-	return c
-}
 func isHealthRequest(data []byte) bool {
 	fields := strings.Fields(strings.SplitN(string(data), "\r\n", 2)[0])
 	return len(fields) >= 2 && (fields[0] == "GET" || fields[0] == "HEAD") && (fields[1] == "/health" || fields[1] == "/healthz")
@@ -267,7 +111,7 @@ func writeHealthOK(c net.Conn) {
 	_ = c.Close()
 }
 func writeUnavailable(c net.Conn) {
-	_, _ = io.WriteString(c, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nInference runtime is unavailable\n")
+	_, _ = io.WriteString(c, "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\nRuntime is unavailable\n")
 }
 func inspectConnection(c net.Conn) ([]byte, bool) {
 	b := make([]byte, 8192)
@@ -515,13 +359,18 @@ func (s *PersistentServer) proxy(ctx context.Context, client net.Conn, b Backend
 		return
 	}
 	defer upstream.Close()
+	_ = upstream.SetWriteDeadline(time.Now().Add(s.config.ConnectionIdleTimeout()))
 	if _, err := upstream.Write(buffered); err != nil {
 		return
 	}
 	s.relay(ctx, b.Name, client, upstream)
 }
 func (s *PersistentServer) relay(ctx context.Context, name string, a, b net.Conn) {
-	deadline := s.config.ConnectionIdleTimeout()
+	relayConnections(ctx, a, b, s.config.ConnectionIdleTimeout(), func() { s.touch(name) })
+}
+
+// Both profiles share byte-activity deadlines and TCP half-close semantics.
+func relayConnections(ctx context.Context, a, b net.Conn, deadline time.Duration, activity func()) {
 	_ = a.SetDeadline(time.Now().Add(deadline))
 	_ = b.SetDeadline(time.Now().Add(deadline))
 	done := make(chan struct{})
@@ -540,14 +389,23 @@ func (s *PersistentServer) relay(ctx context.Context, name string, a, b net.Conn
 		for {
 			n, err := src.Read(buf)
 			if n > 0 {
-				_, _ = dst.Write(buf[:n])
 				_ = src.SetDeadline(time.Now().Add(deadline))
 				_ = dst.SetDeadline(time.Now().Add(deadline))
-				s.touch(name)
+				if activity != nil {
+					activity()
+				}
+				if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+					_ = src.Close()
+					_ = dst.Close()
+					return
+				}
 			}
 			if err != nil {
-				if tcp, ok := dst.(*net.TCPConn); ok {
+				if tcp, ok := dst.(*net.TCPConn); ok && err == io.EOF {
 					_ = tcp.CloseWrite()
+				} else {
+					_ = src.Close()
+					_ = dst.Close()
 				}
 				return
 			}
@@ -755,13 +613,13 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 		}
 		ls, err := s.listen()
 		if err != nil {
-			log.Printf("listen on Moonlight ports: %v", err)
+			log.Printf("listen on handoff ports: %v", err)
 			if !waitContext(ctx, time.Second) {
 				break
 			}
 			continue
 		}
-		log.Printf("waiting on Moonlight ports")
+		log.Printf("waiting on handoff ports")
 		ev := s.waitTraffic(ctx, ls)
 		if ev.tcp == nil && !ev.udp {
 			continue
@@ -813,14 +671,14 @@ func (s *HandoffServer) listen() (*handoffListeners, error) {
 	h := &handoffListeners{}
 	fail := func(e error) (*handoffListeners, error) { h.close(); return nil, e }
 	for _, p := range s.config.PortHandoff.TCPPorts {
-		l, e := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", p))
+		l, e := net.Listen("tcp4", net.JoinHostPort(s.config.PortHandoff.ListenHost, fmt.Sprint(p)))
 		if e != nil {
 			return fail(e)
 		}
 		h.tcp = append(h.tcp, l)
 	}
 	for _, p := range s.config.PortHandoff.UDPPorts {
-		c, e := net.ListenUDP("udp4", &net.UDPAddr{Port: p})
+		c, e := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(s.config.PortHandoff.ListenHost), Port: p})
 		if e != nil {
 			return fail(e)
 		}
@@ -962,20 +820,11 @@ func (s *HandoffServer) proxy(ctx context.Context, client net.Conn, port int, da
 		}
 	}()
 	defer close(done)
-	_, _ = up.Write(data)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = ioCopy(up, client) }()
-	go func() { defer wg.Done(); _, _ = ioCopy(client, up) }()
-	wg.Wait()
-}
-func ioCopy(dst net.Conn, src net.Conn) (int64, error) { return copyAndHalfClose(dst, src) }
-func copyAndHalfClose(dst net.Conn, src net.Conn) (int64, error) {
-	n, e := io.Copy(dst, src)
-	if tcp, ok := dst.(*net.TCPConn); ok {
-		_ = tcp.CloseWrite()
+	_ = up.SetWriteDeadline(time.Now().Add(s.config.ConnectionIdleTimeout()))
+	if _, err := up.Write(data); err != nil {
+		return
 	}
-	return n, e
+	relayConnections(ctx, client, up, s.config.ConnectionIdleTimeout(), nil)
 }
 func (s *HandoffServer) games(ctx context.Context) bool {
 	names, err := s.docker.ContainerNames(ctx)
@@ -984,7 +833,7 @@ func (s *HandoffServer) games(ctx context.Context) bool {
 		return true
 	}
 	runtime := strings.ToLower(s.config.PortHandoff.RuntimeName)
-	serviceNames := map[string]bool{runtime: true}
+	serviceNames := map[string]bool{runtime: true, strings.ToLower(s.config.PortHandoff.GateName): true}
 	for _, suffix := range []string{"-runtime", "_runtime"} {
 		if base := strings.TrimSuffix(runtime, suffix); base != "" {
 			serviceNames[base] = true
@@ -1031,28 +880,25 @@ func (s *HandoffServer) monitor(ctx context.Context) error {
 
 // --- cmd/gate/main.go ---
 func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "-healthcheck" || os.Args[1] == "--healthcheck" || os.Args[1] == "healthcheck" || os.Args[1] == "--health" || os.Args[1] == "-health") {
+	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
 		return
 	}
 	log.SetFlags(log.LstdFlags)
 	health := flag.Bool("health", false, "exit successfully for container health checks")
-	configPath := flag.String("config", "", "path to JSON configuration")
+	flag.BoolVar(health, "healthcheck", false, "alias for --health")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		log.Printf("unexpected positional arguments")
+		os.Exit(2)
+	}
 	if *health {
 		return
 	}
-	var c Config
-	var err error
-	if *configPath == "" {
-		c, err = ConfigFromEnv(os.Getenv)
-	} else {
-		c, err = LoadConfig(*configPath)
-	}
+	c, err := ConfigFromEnv(os.Getenv)
 	if err != nil {
 		log.Printf("configuration error: %v", err)
 		os.Exit(2)
 	}
-	c = ApplyEnv(c)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	docker := NewDockerClient(c.DockerSocket)

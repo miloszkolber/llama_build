@@ -2,7 +2,7 @@
 
 Independent, shell-free inference images published to GHCR as `latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI), and `whisper_runtime` (Vulkan).
 
-Gate starts separate runtime containers on demand and stops them when idle. Actual GPU/DRM release requires runtime acceptance testing.
+Gate starts separate runtime containers on demand and stops them when idle. Actual GPU/DRM release requires runtime acceptance testing. The shared [gate](cmd/gate/README.md) also supports environment-only TCP/UDP port handoff for streaming, with no external gate configuration file.
 
 Behavior changes follow the [spec-driven workflow](openspec/README.md#working-a-change).
 

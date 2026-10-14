@@ -1,13 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
+	"strings"
 )
 
-// Environment defaults mirror the existing two-backend persistent proxy.
-// Explicit --config remains supported for other existing gate profiles.
+// An absent profile preserves the existing two-backend inference proxy.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	value := func(key, fallback string) string {
 		if v := getenv(key); v != "" {
@@ -15,10 +15,22 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		}
 		return fallback
 	}
+	profile := value("GATE_PROFILE", "persistent-proxy")
+	if profile != "persistent-proxy" && profile != "port-handoff" {
+		return Config{}, fmt.Errorf("GATE_PROFILE must be persistent-proxy or port-handoff")
+	}
+	host := value("GATE_HOST", "127.0.0.1")
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil {
+		return Config{}, fmt.Errorf("GATE_HOST must be an IPv4 address")
+	}
 	numbers := map[string]int{
 		"IDLE_TIMEOUT": 300, "STARTUP_TIMEOUT": 180, "CONNECTION_IDLE_TIMEOUT": 600,
-		"LLAMA_PROXY_PORT": 4667, "WHISPER_PROXY_PORT": 4670,
-		"LLAMA_ARG_PORT": 9668, "WHISPER_PORT": 9670,
+	}
+	if profile == "persistent-proxy" {
+		for key, fallback := range map[string]int{"LLAMA_PROXY_PORT": 4667, "WHISPER_PROXY_PORT": 4670, "LLAMA_ARG_PORT": 9668, "WHISPER_PORT": 9670} {
+			numbers[key] = fallback
+		}
 	}
 	for key, fallback := range numbers {
 		n, err := strconv.Atoi(value(key, strconv.Itoa(fallback)))
@@ -27,18 +39,79 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		}
 		numbers[key] = n
 	}
-	backends := PersistentProxyConfig{Backends: []BackendConfig{
-		{Name: "llama", RuntimeName: value("LLAMA_RUNTIME", "llama-runtime"), ListenHost: value("GATE_HOST", "127.0.0.1"), ListenPort: numbers["LLAMA_PROXY_PORT"], UpstreamPort: numbers["LLAMA_ARG_PORT"], HealthPath: "/health"},
-		{Name: "whisper", RuntimeName: value("WHISPER_RUNTIME", "whisper-runtime"), ListenHost: value("GATE_HOST", "127.0.0.1"), ListenPort: numbers["WHISPER_PROXY_PORT"], UpstreamPort: numbers["WHISPER_PORT"], HealthPath: "/health"},
-	}}
-	data, err := json.Marshal(map[string]any{
-		"version": 1, "profile": "persistent-proxy",
-		"docker_socket":        value("DOCKER_SOCKET", "/var/run/docker.sock"),
-		"idle_timeout_seconds": numbers["IDLE_TIMEOUT"], "startup_timeout_seconds": numbers["STARTUP_TIMEOUT"],
-		"connection_idle_timeout_seconds": numbers["CONNECTION_IDLE_TIMEOUT"], "persistent_proxy": backends,
-	})
-	if err != nil {
+	c := Config{Profile: profile, DockerSocket: value("DOCKER_SOCKET", "/var/run/docker.sock"), IdleTimeoutSeconds: numbers["IDLE_TIMEOUT"], StartupTimeoutSeconds: numbers["STARTUP_TIMEOUT"], ConnectionIdleTimeoutSeconds: numbers["CONNECTION_IDLE_TIMEOUT"]}
+	if profile == "persistent-proxy" {
+		c.PersistentProxy = &PersistentProxyConfig{Backends: []BackendConfig{
+			{Name: "llama", RuntimeName: value("LLAMA_RUNTIME", "llama-runtime"), ListenHost: host, ListenPort: numbers["LLAMA_PROXY_PORT"], UpstreamPort: numbers["LLAMA_ARG_PORT"], HealthPath: "/health"},
+			{Name: "whisper", RuntimeName: value("WHISPER_RUNTIME", "whisper-runtime"), ListenHost: host, ListenPort: numbers["WHISPER_PROXY_PORT"], UpstreamPort: numbers["WHISPER_PORT"], HealthPath: "/health"},
+		}}
+	} else {
+		p := &PortHandoffConfig{RuntimeName: getenv("GATE_RUNTIME"), GateName: getenv("GATE_CONTAINER_NAME"), ListenHost: host}
+		if !dockerName(p.RuntimeName) || !dockerName(p.GateName) || strings.EqualFold(p.RuntimeName, p.GateName) {
+			return Config{}, fmt.Errorf("GATE_RUNTIME and GATE_CONTAINER_NAME must be distinct Docker names")
+		}
+		var err error
+		if p.TCPPorts, err = portsFromEnv("GATE_TCP_PORTS", getenv("GATE_TCP_PORTS")); err != nil {
+			return Config{}, err
+		}
+		if p.UDPPorts, err = portsFromEnv("GATE_UDP_PORTS", getenv("GATE_UDP_PORTS")); err != nil {
+			return Config{}, err
+		}
+		if p.ActivityPrefixes, err = listFromEnv("GATE_ACTIVITY_PREFIXES", getenv("GATE_ACTIVITY_PREFIXES")); err != nil {
+			return Config{}, err
+		}
+		c.PortHandoff = p
+	}
+	if err := validateConfig(c); err != nil {
 		return Config{}, err
 	}
-	return ParseConfig(data)
+	return c, nil
+}
+
+func listFromEnv(name, raw string) ([]string, error) {
+	items := strings.Split(raw, ",")
+	for i := range items {
+		items[i] = strings.TrimSpace(items[i])
+		if items[i] == "" {
+			return nil, fmt.Errorf("%s requires non-empty comma-separated values", name)
+		}
+	}
+	return items, nil
+}
+
+func portsFromEnv(name, raw string) ([]int, error) {
+	items, err := listFromEnv(name, raw)
+	if err != nil {
+		return nil, err
+	}
+	ports := make([]int, len(items))
+	for i, item := range items {
+		ports[i], err = strconv.Atoi(item)
+		if err != nil {
+			return nil, fmt.Errorf("%s must contain integer ports", name)
+		}
+	}
+	if err := validPorts(ports); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return ports, nil
+}
+
+func validateConfig(c Config) error {
+	if !validTimeoutSeconds(c.IdleTimeoutSeconds) || !validTimeoutSeconds(c.StartupTimeoutSeconds) || !validTimeoutSeconds(c.ConnectionIdleTimeoutSeconds) {
+		return fmt.Errorf("timeout values must be positive integer seconds without duration overflow")
+	}
+	if c.PersistentProxy != nil {
+		names, runtimes, ports := map[string]bool{}, map[string]bool{}, map[int]bool{}
+		for _, b := range c.PersistentProxy.Backends {
+			if !dockerName(b.Name) || !dockerName(b.RuntimeName) || b.ListenPort < 1 || b.ListenPort > 65535 || b.UpstreamPort < 1 || b.UpstreamPort > 65535 || !validHealthPath(b.HealthPath) {
+				return fmt.Errorf("invalid persistent backend %q", b.Name)
+			}
+			if names[b.Name] || runtimes[b.RuntimeName] || ports[b.ListenPort] {
+				return fmt.Errorf("duplicate backend name, runtime name, or listener port %q", b.Name)
+			}
+			names[b.Name], runtimes[b.RuntimeName], ports[b.ListenPort] = true, true, true
+		}
+	}
+	return nil
 }

@@ -74,53 +74,6 @@ func (d *raceDocker) Start(context.Context, string) error              { return 
 func (d *raceDocker) Stop(context.Context, string) error               { d.stops++; return nil }
 func (d *raceDocker) ContainerNames(context.Context) ([]string, error) { return nil, nil }
 
-func TestConfigStrictness(t *testing.T) {
-	valid := `{"version":1,"profile":"persistent-proxy","idle_timeout_seconds":1,"startup_timeout_seconds":1,"connection_idle_timeout_seconds":1,"persistent_proxy":{"backends":[{"name":"x","runtime_name":"x","listen_port":1,"upstream_port":2,"health_path":"/"}]}}`
-	for _, bad := range []string{strings.Replace(valid, "\"version\":1", "\"version\":1,\"extra\":true", 1), strings.Replace(valid, "persistent_proxy", "port_handoff", 1), valid + " {}"} {
-		if _, err := ParseConfig([]byte(bad)); err == nil {
-			t.Fatalf("accepted invalid config %s", bad)
-		}
-	}
-}
-
-func TestConfigRejectsUnsafeNamesPathsAndTimeouts(t *testing.T) {
-	valid := `{"version":1,"profile":"persistent-proxy","idle_timeout_seconds":1,"startup_timeout_seconds":1,"connection_idle_timeout_seconds":1,"persistent_proxy":{"backends":[{"name":"backend","runtime_name":"runtime","listen_port":1,"upstream_port":2,"health_path":"/ready"}]}}`
-	for _, bad := range []string{
-		strings.Replace(valid, `"runtime"`, `"runtime/name"`, 1),
-		strings.Replace(valid, `"backend"`, `"bad name"`, 1),
-		strings.Replace(valid, `"/ready"`, `"/ready\u000aheader"`, 1),
-	} {
-		if _, err := ParseConfig([]byte(bad)); err == nil {
-			t.Fatalf("accepted unsafe config %s", bad)
-		}
-	}
-	for _, field := range []string{"idle_timeout_seconds", "startup_timeout_seconds", "connection_idle_timeout_seconds"} {
-		bad := strings.Replace(valid, `"`+field+`":1`, `"`+field+`":9223372037`, 1)
-		if _, err := ParseConfig([]byte(bad)); err == nil {
-			t.Fatalf("accepted overflowing %s", field)
-		}
-	}
-	duplicateRuntime := strings.Replace(valid, `]}}`, `,{"name":"other","runtime_name":"runtime","listen_port":3,"upstream_port":4,"health_path":"/"}]}}`, 1)
-	if _, err := ParseConfig([]byte(duplicateRuntime)); err == nil {
-		t.Fatal("accepted duplicate persistent runtime name")
-	}
-}
-
-func TestPortHandoffAllowsSamePortAcrossProtocols(t *testing.T) {
-	config := []byte(`{"version":1,"profile":"port-handoff","idle_timeout_seconds":1,"startup_timeout_seconds":1,"connection_idle_timeout_seconds":1,"port_handoff":{"runtime_name":"wolf-runtime","tcp_ports":[47984],"udp_ports":[47984],"activity_prefixes":["wolf-"]}}`)
-	if _, err := ParseConfig(config); err != nil {
-		t.Fatalf("cross-protocol port rejected: %v", err)
-	}
-}
-func TestEnvOverrides(t *testing.T) {
-	c := Config{IdleTimeoutSeconds: 5, StartupTimeoutSeconds: 7}
-	t.Setenv("IDLE_TIMEOUT", "42")
-	t.Setenv("STARTUP_TIMEOUT", "bad")
-	c = ApplyEnv(c)
-	if c.IdleTimeoutSeconds != 42 || c.StartupTimeoutSeconds != 7 {
-		t.Fatalf("overrides=%+v", c)
-	}
-}
 func TestExactHealthInterception(t *testing.T) {
 	for _, request := range []string{"GET /health HTTP/1.1\r\n\r\n", "HEAD /healthz HTTP/1.1\r\n\r\n"} {
 		if !isHealthRequest([]byte(request)) {
@@ -269,7 +222,7 @@ func TestHandoffProxyPreservesInitialBytes(t *testing.T) {
 		_, _ = c.Write(append([]byte("ok:"), b[:n]...))
 		_ = c.Close()
 	}()
-	s := NewHandoffServer(Config{}, &fakeDocker{})
+	s := NewHandoffServer(Config{ConnectionIdleTimeoutSeconds: 1}, &fakeDocker{})
 	a, b := net.Pipe()
 	done := make(chan struct{})
 	go func() { s.proxy(context.Background(), a, port, []byte("tcp")); close(done) }()
