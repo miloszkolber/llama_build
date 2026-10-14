@@ -20,6 +20,7 @@ The gate's implemented spec explicitly promises continued `--config` support. Re
 - Inference Compose with example env: `docker compose -f compose/docker-compose.yaml --profile runtime config --quiet` and gate-only `config --quiet` pass; gate service `llama` is read-only, UID/GID `1000`, no `devices`, no `--config`, no JSON mount.
 - Wolf gate-only Compose with example env: `docker compose --env-file compose/gate.env -f compose/gate.compose.yaml config --quiet` passes; same candidate image `gate-candidate:local` validates with `image: gate-candidate:local`, read-only, UID/GID `1000`, no `devices`, no `build`, no `--config`, no `gate.json`.
 - `git diff --check` for the gate-owned tracked changes: clean. Portability grep for host paths, deployment hostnames and socket group IDs in the change and new Wolf example: clean except example placeholders with replacement guidance.
+- Review branch `universal-env-gate` pushed as PR `https://github.com/miloszkolber/llama_build/pull/4` against `master`. CI `check` and `validate` pass; CI `build (gate)` and `build (whisper)` pass with final-image smoke checks. CI `build (llama)` remains pending at the time of recording and is unrelated to the gate-owned files except for shared `check` gating.
 
 No live deployment was changed. Mock/socket integration does not establish Intel GPU encoding or Moonlight session acceptance.
 
