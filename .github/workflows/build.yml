@@ -126,9 +126,15 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
           COMPONENT: ${{ matrix.component }}
+          VERSION_TAG: ${{ steps.source.outputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           name="$COMPONENT"
           if [ "$name" != gate ]; then name="${name}_runtime"; fi
-          image="ghcr.io/${OWNER,,}/$name:latest"
-          docker tag build-test:local "$image"
-          docker push "$image"
+          base="ghcr.io/${OWNER,,}/$name"
+          version="$VERSION_TAG"
+          if [ "$COMPONENT" = gate ]; then version="${SOURCE_SHA:0:12}"; fi
+          docker tag build-test:local "$base:latest"
+          docker tag build-test:local "$base:$version"
+          docker push "$base:latest"
+          docker push "$base:$version"

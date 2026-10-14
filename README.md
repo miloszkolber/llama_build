@@ -29,8 +29,9 @@ gate control of the host daemon.
 - Gate: repository changes or manual builds.
 
 The workflow builds each image once, runs a smoke check, and publishes that
-same image as `latest`. Pull requests never publish. OCI labels record
-source commits; use registry digests for exact rollback.
+same image as `latest` plus a versioned tag (upstream release tag for llama
+and Whisper, short repository commit for gate). Pull requests never publish.
+OCI labels record source commits; use registry digests for exact rollback.
 
 Intel packages are resolved from release assets and SHA256-verified, with
 IGC matched to the compute runtime. Dependabot updates Docker bases and

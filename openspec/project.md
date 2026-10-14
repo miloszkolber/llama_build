@@ -3,7 +3,7 @@
 ## Scope
 
 `llama_build` publishes independent, shell-free inference images to GHCR as
-`latest`: `gate`, `llama_runtime` (Intel SYCL, no UI) and `whisper_runtime`
+`latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI) and `whisper_runtime`
 (Vulkan). Gate starts and stops separate runtime containers so idle GPU access
 is released.
 
