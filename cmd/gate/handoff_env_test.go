@@ -141,7 +141,7 @@ func dialGate(t *testing.T, port int) net.Conn {
 	}
 }
 
-func TestEnvironmentHandoffColdTCPIdleReturnAndUDP(t *testing.T) {
+func TestEnvironmentHandoffColdTCPIdleReturnAndReconnect(t *testing.T) {
 	probe, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -188,19 +188,17 @@ func TestEnvironmentHandoffColdTCPIdleReturnAndUDP(t *testing.T) {
 	}
 	<-d.started
 	probeGate(t, port) // Runtime stops and gate reacquires the same port.
-	u, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
-	if err != nil {
+	client = dialGate(t, port)
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = io.WriteString(client, "ping")
+	if _, err := io.ReadFull(client, buf); err != nil {
 		t.Fatal(err)
 	}
-	_, err = u.Write([]byte("trigger"))
-	u.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	client.Close()
 	select {
 	case <-d.started:
 	case <-time.After(2 * time.Second):
-		t.Fatal("UDP did not start runtime")
+		t.Fatal("reconnection did not start runtime")
 	}
 	d.muSockets.Lock()
 	runtimeUDP := d.udp
@@ -214,6 +212,46 @@ func TestEnvironmentHandoffColdTCPIdleReturnAndUDP(t *testing.T) {
 	d.mu.Unlock()
 	if starts != 2 {
 		t.Fatalf("starts=%d", starts)
+	}
+}
+
+func TestEnvironmentHandoffUDPTriggerIsDropped(t *testing.T) {
+	c := environmentHandoff(t)
+	c.PortHandoff.TCPPorts, c.PortHandoff.UDPPorts = []int{0}, []int{0}
+	s := NewHandoffServer(c, &fakeDocker{})
+	ls, err := s.listen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ls.close()
+	addr := ls.udp[0].LocalAddr().(*net.UDPAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	events := make(chan traffic, 1)
+	go func() { events <- s.waitTraffic(ctx, ls) }()
+	u, err := net.DialUDP("udp4", nil, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = u.Write([]byte("trigger"))
+	u.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	if !event.udp || event.tcp != nil {
+		t.Fatal("UDP did not trigger handoff")
+	}
+	// Readiness is synchronized by actual ownership of the sockets, not a
+	// preceding TCP health response (which deliberately releases listeners).
+	runtime, err := net.ListenUDP("udp4", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	runtime.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	if _, _, err = runtime.ReadFromUDP(make([]byte, 32)); err == nil {
+		t.Fatal("UDP trigger replayed")
 	}
 }
 
