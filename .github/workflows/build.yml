@@ -103,12 +103,22 @@ jobs:
             BUILD_DATE=${{ steps.source.outputs.date }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=min,ignore-error=true,scope={0}', matrix.component) || '' }}
+      - uses: actions/setup-go@v7
+        if: matrix.component == 'gate'
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Final-image smoke check
         env:
           COMPONENT: ${{ matrix.component }}
         run: |
           if [ "$COMPONENT" = gate ]; then
-            docker run --rm build-test:local --health
+            docker run --rm --read-only --network none build-test:local --health
+            mkdir -p .build
+            container="$(docker create build-test:local)"
+            trap 'docker rm -f "$container" >/dev/null' EXIT
+            docker cp "$container:/app/gate" .build/gate
+            GATE_BINARY="$PWD/.build/gate" go test ./cmd/gate -run TestGateBinaryProfiles -count=1 -v
           else
             docker run --rm build-test:local --help
             if [ "$COMPONENT" = llama ]; then
