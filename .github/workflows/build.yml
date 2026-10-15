@@ -88,8 +88,23 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h
+      - name: Check published inputs
+        id: published
+        env:
+          COMPONENT: ${{ matrix.component }}
+          SOURCE_TAG: ${{ steps.source.outputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          REPO_SHA: ${{ github.sha }}
+          DRIVERS_FILE: ${{ matrix.component == 'llama' && '.build/drivers.json' || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          name="$COMPONENT"
+          if [ "$name" != gate ]; then name="${name}_runtime"; fi
+          python3 scripts/check_inputs.py "ghcr.io/${OWNER,,}/$name" "$SOURCE_TAG"
       - uses: docker/setup-buildx-action@v4
       - name: Build once for testing and publication
+        if: steps.published.outputs.skip != 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -101,6 +116,7 @@ jobs:
           build-args: |
             SOURCE_SHA=${{ steps.source.outputs.sha }}
             BUILD_DATE=${{ steps.source.outputs.date }}
+            INPUTS_FP=${{ steps.published.outputs.fingerprint }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=min,ignore-error=true,scope={0}', matrix.component) || '' }}
       - uses: actions/setup-go@v7
@@ -109,6 +125,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Final-image smoke check
+        if: steps.published.outputs.skip != 'true'
         env:
           COMPONENT: ${{ matrix.component }}
         run: |
@@ -132,7 +149,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish exactly the tested image
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && steps.published.outputs.skip != 'true'
         env:
           OWNER: ${{ github.repository_owner }}
           COMPONENT: ${{ matrix.component }}

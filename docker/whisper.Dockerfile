@@ -28,7 +28,9 @@ RUN python3 /collect-rootfs.py build/bin whisper-server /rootfs vulkan
 
 FROM scratch
 ARG SOURCE_SHA
+ARG INPUTS_FP
 LABEL org.opencontainers.image.revision="$SOURCE_SHA"
+LABEL llama-build.inputs="$INPUTS_FP"
 COPY --from=build /rootfs/ /
 COPY --from=helper /probe /app/probe
 COPY --from=helper /whisper-entrypoint /app/whisper-entrypoint

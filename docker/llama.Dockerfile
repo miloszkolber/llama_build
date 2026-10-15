@@ -40,7 +40,9 @@ RUN source /opt/intel/oneapi/setvars.sh --force \
 
 FROM scratch
 ARG SOURCE_SHA
+ARG INPUTS_FP
 LABEL org.opencontainers.image.revision="$SOURCE_SHA"
+LABEL llama-build.inputs="$INPUTS_FP"
 COPY --from=build /rootfs/ /
 COPY --from=build /drivers.json /licenses/drivers.json
 COPY --from=helper /probe /app/probe
