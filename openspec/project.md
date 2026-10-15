@@ -2,10 +2,7 @@
 
 ## Scope
 
-`llama_build` publishes independent, shell-free inference images to GHCR as
-`latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI) and `whisper_runtime`
-(Vulkan). Gate starts and stops separate runtime containers so idle GPU access
-is released.
+`llama_build` publishes independent, shell-free inference images to GHCR as `latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI) and `whisper_runtime` (Vulkan). Gate starts and stops separate runtime containers so idle GPU access is released.
 
 | Deliverable | Source | Artifact |
 | --- | --- | --- |
@@ -14,11 +11,7 @@ is released.
 | Whisper runtime | `docker/whisper.Dockerfile`, `cmd/whisper/`, `cmd/probe/` | `ghcr.io/miloszkolber/whisper_runtime` |
 | Deployment example | `compose/` | Remote-image Compose template, not a published artifact |
 
-Upstream inference sources are `ggml-org/llama.cpp` and
-`ggml-org/whisper.cpp`. Intel GPU dependencies are resolved from release
-assets and SHA256-verified. Exact versions live in Dockerfiles, `resolve.py`,
-workflows and OCI labels, not a second inventory here. Mutable base tags and
-upstream package resolutions mean builds are **not bit-reproducible**.
+Upstream inference sources are `ggml-org/llama.cpp` and `ggml-org/whisper.cpp`. Intel GPU dependencies are resolved from release assets and SHA256-verified. Exact versions live in Dockerfiles, `resolve.py`, workflows and OCI labels, not a second inventory here. Mutable base tags and upstream package resolutions mean builds are **not bit-reproducible**.
 
 ## Goals and boundaries
 
@@ -27,9 +20,7 @@ upstream package resolutions mean builds are **not bit-reproducible**.
 - Keep configuration environment-driven and the repository host-neutral.
 - Make future changes reviewable through requirements, scenarios and evidence.
 
-The gate consumes the host Docker daemon through a mounted socket; socket
-access is a trust grant, not isolation. Runtimes require Intel DRM devices and
-the render group. The llama cache mount must be writable by UID 1000.
+The gate consumes the host Docker daemon through a mounted socket; socket access is a trust grant, not isolation. Runtimes require Intel DRM devices and the render group. The llama cache mount must be writable by UID 1000.
 
 ## Owners
 
@@ -41,5 +32,4 @@ the render group. The llama cache mount must be writable by UID 1000.
 | Host deployment, credentials, recovery | Local deployment docs, outside this repository |
 | Upstream inference behavior | `ggml-org/llama.cpp` and `ggml-org/whisper.cpp`, not this build repository |
 
-Publication does not itself deploy. An authorized host rollout does. Keep
-tokens out of source, artifacts, URLs and diagnostics.
+Publication does not itself deploy. An authorized host rollout does. Keep tokens out of source, artifacts, URLs and diagnostics.

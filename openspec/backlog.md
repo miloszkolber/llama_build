@@ -1,7 +1,6 @@
 # Deferred work and ownership
 
-These entries preserve useful direction without pretending a design has been
-approved. Start a change only when its scope and authority are settled.
+These entries preserve useful direction without pretending a design has been approved. Start a change only when its scope and authority are settled.
 
 | Area | State | Next evidence or decision |
 | --- | --- | --- |
