@@ -1,8 +1,8 @@
 # llama_build
 
-Independent, shell-free inference images published to GHCR as `latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI), and `whisper_runtime` (Vulkan).
+Independent, shell-free inference images on GHCR as `latest` plus versioned tags: `gate`, `llama_runtime` (Intel SYCL, no UI) and `whisper_runtime` (Vulkan).
 
-Gate starts separate runtime containers on demand and stops them when idle. Actual GPU/DRM release requires runtime acceptance testing. The shared [gate](cmd/gate/README.md) also supports environment-only TCP/UDP port handoff for streaming, with no external gate configuration file.
+Gate starts runtime containers on demand and stops them when idle to free the GPU. The shared [gate](cmd/gate/README.md) also hands off TCP/UDP ports for streaming from environment alone, with no configuration file.
 
 Behavior changes follow the [spec-driven workflow](openspec/README.md#working-a-change).
 
@@ -16,35 +16,33 @@ docker compose -f compose/docker-compose.yaml --profile runtime create
 docker compose -f compose/docker-compose.yaml up -d llama
 ```
 
-One `.env` supplies native llama `LLAMA_ARG_*` settings, `WHISPER_*` settings translated into command arguments by the custom Go entrypoint, and gate settings.
+One `.env` carries native llama `LLAMA_ARG_*` settings, `WHISPER_*` settings translated by the Go entrypoint, and gate settings.
 
-Compose pulls remote images, uses read-only root filesystems and checks runtime `/health` endpoints. Runtime scratch space is writable `/tmp`. The llama cache mount must be writable by UID 1000. Gate's `--health` checks binary execution, not backend readiness. The Docker socket grants gate control of the host daemon.
+Compose always pulls remote images. Runtimes use read-only root filesystems with writable `/tmp` and `/health` checks. The llama cache mount must be writable by UID 1000. Gate `--health` checks binary execution, not backend readiness. The Docker socket grants gate control of the host daemon.
 
 ## Builds
 
-- llama: scheduled daily at 02:00 Europe/Warsaw, `b…` prereleases until stable v0.7.0, then stable releases.
-- Whisper: scheduled Monday at 02:00 Europe/Warsaw, stable releases >=v1.9.5.
-- Gate: push/PR builds or manual dispatch, with no scheduled build.
+- llama: daily at 02:00 Europe/Warsaw, stable releases >=v0.7.0.
+- Whisper: Mondays at 02:00 Europe/Warsaw, stable releases >=v1.9.5.
+- Gate: push, pull-request or manual builds. No schedule.
 
-Scheduled runs may be delayed. Pushes and pull requests build all three images unless the only changed path is `README.md`. Manual dispatch selects one image or all three. Publication is restricted to non-PR runs on the default branch.
+Runs may be delayed. Pushes and pull requests build all three images unless only `README.md` changed. Manual dispatch selects images. Only non-PR runs on the default branch publish.
 
-The workflow builds each selected image once, runs a smoke check, and publishes that same image as `latest` plus a versioned tag (upstream release tag for llama and Whisper, 12-character repository commit for gate). Rebuilding the same release or repository commit can overwrite its versioned tag. Scheduled runs skip an image entirely when the published versioned tag already carries the resolved inputs fingerprint, so unchanged days publish nothing new. These tags retain older release names, not every historical build. OCI labels record source commits and the inputs fingerprint. Use registry digests for exact rollback.
+Each image is built once, smoke-checked, then published as `latest` plus a versioned tag (upstream release tag, or 12-character repository commit for gate). Scheduled runs skip images whose published tag already carries the resolved inputs. Manual rebuilds can still overwrite a versioned tag. Tags keep older release names. OCI labels record source commits and input fingerprints. Use registry digests for exact rollback.
 
-Intel packages are resolved from release assets and SHA256-verified, with IGC matched to the compute runtime. Dependabot updates Docker bases and Actions. Future upstream compatibility is not guaranteed. Source resolution, build or smoke-check failures prevent publication of the affected image. Publication is not atomic across images or tags. A later failure does not undo an earlier successful push.
+Intel packages resolve from release assets with SHA256 verification and IGC matched to the compute runtime. Dependabot covers Docker bases and Actions. Upstream compatibility is not guaranteed. A failed resolution, build or smoke check blocks publication of that image. Publication is not atomic across images or tags, and a later failure does not undo an earlier successful push.
 
 ## Develop
 
-`docker/` contains image builds, `cmd/` the dependency-free Go services, `scripts/` release/dependency resolution and rootfs assembly, and `compose/` the deployment example.
+`docker/` holds image builds, `cmd/` the dependency-free Go services, `scripts/` release and dependency resolution plus rootfs assembly, and `compose/` the deployment example.
 
 ```sh
 go test ./... && go vet ./...
 python3 -m unittest discover -s tests
 ```
 
-Gate is adapted from toolkit commit `35aed1c39fac35c04b4aac673f7b584f8b69caae`.
-
-Whisper links FFmpeg libraries. Its shell-based `--convert` option is not supported. GPU performance, transcription fidelity and idle DRM release require separate acceptance tests. Build checks alone do not establish parity.
+Gate derives from toolkit commit `35aed1c39fac35c04b4aac673f7b584f8b69caae`. Whisper links FFmpeg libraries and its shell-based `--convert` is unsupported. GPU performance, transcription fidelity and idle DRM release need dedicated acceptance tests beyond build checks.
 
 ## Documentation
 
-[`openspec/`](openspec/README.md) is the single documentation and planning tree: implemented [contracts](openspec/specs/), scoped [changes](openspec/changes/) and the [deferred backlog](openspec/backlog.md). Start at [`openspec/README.md`](openspec/README.md).
+[`openspec/`](openspec/README.md) is the single planning tree: implemented [contracts](openspec/specs/), scoped [changes](openspec/changes/) and the [deferred backlog](openspec/backlog.md).
