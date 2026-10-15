@@ -5,12 +5,15 @@ COPY go.mod ./
 COPY cmd/probe/ cmd/probe/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /probe ./cmd/probe
 
-FROM intel/oneapi-toolkit:2026.1.1-devel-ubuntu24.04 AS compile
+FROM intel/deep-learning-essentials:2026.1.1-devel-ubuntu24.04 AS compile
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG SOURCE_SHA
 ARG BUILD_DATE
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake ninja-build python3 ca-certificates libssl-dev ocl-icd-libopencl1
+ADD --checksum=sha256:c82f3d950d568ca4108c0876dc245d5f41518cce4ffa935cab2c4a8e1acc74f0 https://registrationcenter-download.intel.com/akdlm/IRC_NAS/94c3dbac-0852-45be-a57d-21c204cada3e/intel-onednn-2026.0.2.46_offline.sh /tmp/onednn.sh
+RUN bash /tmp/onednn.sh -s -a --silent --eula accept \
+    && rm -f /tmp/onednn.sh
 COPY scripts/install-drivers.py /install-drivers.py
 COPY .build/drivers.json /drivers.json
 # Install the matched vendor stack even if the toolkit carries a newer GMM revision.
@@ -24,7 +27,7 @@ RUN git init -q && git remote add origin https://github.com/ggml-org/llama.cpp.g
 RUN source /opt/intel/oneapi/setvars.sh --force \
     && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
-      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_NATIVE=OFF \
+      -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_SYCL_DNN=ON -DGGML_NATIVE=OFF \
       -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
       -DLLAMA_BUILD_TESTS=OFF -DLLAMA_CURL=OFF \
       -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF \

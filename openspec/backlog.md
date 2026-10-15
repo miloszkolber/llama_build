@@ -4,7 +4,7 @@ These entries preserve useful direction without pretending a design has been app
 
 | Area | State | Next evidence or decision |
 | --- | --- | --- |
-| Dependency maintenance | Mechanism active 2026-10-14 | A scheduled maintenance pass, configured by the operator outside this repository, reviews llama.cpp/whisper.cpp releases, SYCL/Vulkan backend changes, Intel GPU release assets, Docker base images, Go toolchain pins and Actions that Dependabot does not cover, and keeps a high-water mark. Dependabot owns weekly Docker-base and Actions bumps per `.github/dependabot.yml` |
+| Dependency maintenance | Mechanism active, review expanded 2026-10-15 | The externally configured scheduled pass re-derives dependencies and compares official upstream Dockerfiles, build/release workflows, install scripts and backend configuration against local consumers, not just release notes. It tracks per-upstream reviewed revisions and incomplete coverage in `openspec/maintenance-state.md` when runs occur. Package splits and base-family migrations require an explicit decision, even without a version bump. Dependabot owns weekly Docker-base and Actions bumps per `.github/dependabot.yml` |
 | SYCL backend tracking | Next investigation | Review llama.cpp SYCL changes (Level Zero selection, oneDNN/MKL/oneCCL paths, flash-attention/graph/fusion flags) and propose alignment deltas only with buildable evidence |
 | llama.cpp release adoption | Policy active | Daily builds follow `b…` prereleases until stable v0.7.0, then stable releases; failed builds leave the published image unchanged |
 | Whisper release adoption | Policy active | Weekly builds track stable releases >=v1.9.5; Vulkan-only, no SYCL |

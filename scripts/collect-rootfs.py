@@ -1,11 +1,25 @@
 """Collect matching runtime libraries, including SYCL/Intel dlopen plugins."""
 import glob
+import fnmatch
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+
+
+def driver_libraries(patterns, cache):
+    preferred = {}
+    for name, path in re.findall(r"^\s*(\S+)\s+\([^\n]*\)\s+=>\s+(/\S+)", cache, re.MULTILINE):
+        preferred.setdefault(name, path)
+    libraries = []
+    for pattern in patterns:
+        matches = [path for name, path in preferred.items() if fnmatch.fnmatchcase(name, pattern)]
+        if not matches:
+            raise RuntimeError("missing Intel runtime libraries: " + pattern)
+        libraries.extend(matches)
+    return list(dict.fromkeys(libraries))
 
 
 def collect(bindir, binary, root, backend="sycl"):
@@ -48,12 +62,19 @@ def collect(bindir, binary, root, backend="sycl"):
                 copy(src, str(src))
     patterns = (["libze*.so*", "libig*.so*", "libOpenCL.so*", "libocloc.so*"]
                 if backend == "sycl" else ["libvulkan.so*", "libvulkan_intel*.so*"])
-    for pattern in patterns:
-        matches = glob.glob("/usr/lib/x86_64-linux-gnu/" + pattern)
-        if not matches:
-            raise RuntimeError("missing Intel runtime libraries: " + pattern)
-        for lib in matches:
+    # Follow the build loader's preferred SONAME, including vendor packages in
+    # /usr/local/lib, instead of collecting stale distro copies by directory.
+    if backend == "sycl":
+        cache = subprocess.run(["ldconfig", "-p"], check=True, text=True, capture_output=True).stdout
+        for lib in driver_libraries(patterns, cache):
             copy(lib, lib)
+    else:
+        for pattern in patterns:
+            matches = glob.glob("/usr/lib/x86_64-linux-gnu/" + pattern)
+            if not matches:
+                raise RuntimeError("missing Intel runtime libraries: " + pattern)
+            for lib in matches:
+                copy(lib, lib)
     if backend == "sycl":
         # ICD drivers are loaded by filename, not linked into libOpenCL.
         for icd in Path("/etc/OpenCL/vendors").glob("*.icd"):
@@ -97,6 +118,9 @@ def collect(bindir, binary, root, backend="sycl"):
             copy(manifest, manifest)
     for copyright_file in Path("/usr/share/doc").glob("*/copyright"):
         copy(copyright_file, str(copyright_file))
+    if backend == "sycl":
+        for name in ["LICENSE", "THIRD-PARTY-PROGRAMS"]:
+            copy(Path("/opt/intel/oneapi/dnnl/latest/share/doc/dnnl") / name, "/licenses/onednn/" + name)
     (root / "etc/passwd").write_text("runtime:x:1000:1000:runtime:/home/runtime:/nonexistent\n")
     (root / "etc/group").write_text("runtime:x:1000:\n")
     (root / "etc/nsswitch.conf").write_text("hosts: files dns\n")
