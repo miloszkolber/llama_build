@@ -126,6 +126,21 @@ func probeGate(t *testing.T, port int) {
 	t.Fatal("gate did not answer health while owning its port")
 }
 
+func dialGate(t *testing.T, port int) net.Conn {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, err := net.Dial("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			return conn
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestEnvironmentHandoffColdTCPIdleReturnAndUDP(t *testing.T) {
 	probe, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -160,10 +175,7 @@ func TestEnvironmentHandoffColdTCPIdleReturnAndUDP(t *testing.T) {
 	if starts != 0 {
 		t.Fatal("health probe woke runtime")
 	}
-	client, err := net.Dial("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := dialGate(t, port)
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 	_, _ = io.WriteString(client, "ping")
 	buf := make([]byte, 7)

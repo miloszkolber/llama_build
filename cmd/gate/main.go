@@ -292,12 +292,14 @@ func (s *PersistentServer) Serve(ctx context.Context) error {
 		}
 		s.listeners = append(s.listeners, l)
 	}
+	// Capture listener ownership before cancellation can clear the shared slice.
+	listeners := append([]net.Listener(nil), s.listeners...)
 	go func() { <-ctx.Done(); s.closeListeners() }()
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.monitor(ctx) }()
 	for i, b := range s.config.PersistentProxy.Backends {
 		s.wg.Add(1)
-		go s.accept(ctx, s.listeners[i], b)
+		go s.accept(ctx, listeners[i], b)
 	}
 	<-ctx.Done()
 	s.wg.Wait()
@@ -599,7 +601,9 @@ type HandoffServer struct {
 
 func NewHandoffServer(c Config, d Docker) *HandoffServer { return &HandoffServer{config: c, docker: d} }
 func (s *HandoffServer) Serve(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	defer s.shutdown()
+	defer func() { cancel(); s.wg.Wait() }()
 	for ctx.Err() == nil {
 		running, err := s.docker.Running(ctx, s.config.PortHandoff.RuntimeName)
 		if err != nil {
@@ -654,7 +658,6 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 			return err
 		}
 	}
-	s.wg.Wait()
 	return nil
 }
 func (s *HandoffServer) shutdown() {

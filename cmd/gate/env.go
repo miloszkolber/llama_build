@@ -24,6 +24,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	if ip == nil || ip.To4() == nil {
 		return Config{}, fmt.Errorf("GATE_HOST must be an IPv4 address")
 	}
+	host = ip.To4().String()
 	numbers := map[string]int{
 		"IDLE_TIMEOUT": 300, "STARTUP_TIMEOUT": 180, "CONNECTION_IDLE_TIMEOUT": 600,
 	}

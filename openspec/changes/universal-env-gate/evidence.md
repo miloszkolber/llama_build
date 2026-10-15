@@ -24,6 +24,12 @@ The gate's implemented spec explicitly promises continued `--config` support. Re
 
 No live deployment was changed. Mock/socket integration does not establish Intel GPU encoding or Moonlight session acceptance.
 
+## Review repairs
+
+The follow-up review found a cancellation race in persistent listener setup and incomplete proxy cleanup on handoff error exits. Listener ownership is now captured before cancellation and handoff cancels/joins its proxy workers on every return. `TestPersistentAlreadyCancelled` and the race suite cover cancellation. IPv4-mapped listener addresses are normalized before binding.
+
+The original candidate checks did not establish request routing through the final-image binary. `TestGateBinaryProfiles`, using the executable extracted from `gate-review:local`, now proves health without wake and cold request forwarding for both profiles against mock Docker HTTP and real runtime sockets. Five repeated runs passed. The final-image CI step now executes this test before publication. A read-only, network-isolated image health smoke check passed. This replaces the earlier weaker parsing/configuration claim, not hardware streaming acceptance.
+
 ## Remaining acceptance
 
 Implementation tasks `1.1` through `3.3` are complete with the evidence above. Publication (`3.4`) and archival (`3.5`) remain open. The candidate image has not been published to GHCR and no versioned gate tag/digest has been recorded. Intel streaming acceptance belongs to the Wolf consumer rather than generic gate unit tests.
