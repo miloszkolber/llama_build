@@ -32,4 +32,6 @@ The original candidate checks did not establish request routing through the fina
 
 ## Remaining acceptance
 
-Implementation tasks `1.1` through `3.3` are complete with the evidence above. Publication (`3.4`) and archival (`3.5`) remain open. The candidate image has not been published to GHCR and no versioned gate tag/digest has been recorded. Intel streaming acceptance belongs to the Wolf consumer rather than generic gate unit tests.
+All gate tasks are complete. PR 4 merged, followed by source revision `816b5f152e9985b400af0d102ef876b044afeb13`. The first post-merge run exposed a test synchronization error: a UDP packet was sent during the deliberate listener handover after a health response. The regression now synchronizes the UDP assertion to actual socket ownership and tests TCP reconnection separately. Three race-suite repetitions passed, and the subsequent CI check and gate build/publication succeeded in run `38702876266`.
+
+Published image: `ghcr.io/miloszkolber/gate:816b5f152e99`, digest `sha256:791ef11cb13be5fbcc59ae5cdb77512c57a30bcb2ab5d729294cd09976e28b40`. The published image passed a read-only, network-isolated health check. Both `TestGateBinaryProfiles` scenarios passed against its extracted executable, exercising mock Docker HTTP plus real TCP forwarding, not just environment parsing. No production container was changed. Intel/Moonlight session acceptance remains the Wolf consumer's separate obligation.

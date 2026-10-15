@@ -18,5 +18,5 @@
 - [x] 3.1 Update this repository's inference example/docs without changing its routes or default behavior. Coordinate the Wolf environment example in its owner, with no gate file, CLI config path or local gate build.
 - [x] 3.2 Run `go test ./...`, `go vet ./...`, documentation checks, strict OpenSpec validation and final gate-image smoke checks. Record actual results and remaining integration gaps.
 - [x] 3.3 Validate both consumers against the same final-image executable, with no GPU devices on gate. `TestGateBinaryProfiles` exercises health without wake and real TCP request forwarding against mock Docker HTTP and real runtime sockets. This is not Intel streaming acceptance.
-- [ ] 3.4 Publish through the existing image owner with a versioned gate tag/digest and document the explicit file-to-environment migration. No automatic host rollout.
-- [ ] 3.5 Review the full diff and acceptance evidence, then sync/archive the delivered gate deltas. Preserve unrelated work.
+- [x] 3.4 Publish through the existing image owner with a versioned gate tag/digest and document the explicit file-to-environment migration. No automatic host rollout.
+- [x] 3.5 Review the full diff and acceptance evidence, then sync/archive the delivered gate deltas. Preserve unrelated work.
