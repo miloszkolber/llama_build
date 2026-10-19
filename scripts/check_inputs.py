@@ -4,8 +4,13 @@ Compares the fingerprint of the resolved inputs against the fingerprint
 label recorded on the published versioned tag. Fails open: any missing
 tag, missing label, fetch error or non-schedule trigger means build.
 
+The fingerprint covers the resolved upstream release, the component's
+build-relevant repository files and, for llama, the resolved driver
+packages. Documentation-only repository changes therefore do not republish
+an unchanged image.
+
 Usage: check_inputs.py <registry-repo> <version-tag>
-Environment: COMPONENT, SOURCE_TAG, SOURCE_SHA, REPO_SHA, DRIVERS_FILE
+Environment: COMPONENT, SOURCE_TAG, SOURCE_SHA, DRIVERS_FILE
 (path to drivers.json, empty when the image has none), EVENT_NAME.
 Emits skip=, reason= and fingerprint= to stdout and $GITHUB_OUTPUT.
 """
@@ -16,7 +21,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fingerprint import LABEL, fingerprint
+from fingerprint import LABEL, fingerprint, repo_inputs_digest
 
 MANIFEST_ACCEPT = ", ".join([
     "application/vnd.oci.image.index.v1+json",
@@ -114,10 +119,10 @@ def main(argv):
     component = os.getenv("COMPONENT", "")
     source_tag = os.getenv("SOURCE_TAG", "")
     source_sha = os.getenv("SOURCE_SHA", "")
-    repo_sha = os.getenv("REPO_SHA", "")
     drivers = load_drivers(os.getenv("DRIVERS_FILE", ""))
     event = os.getenv("EVENT_NAME", "")
-    wanted = fingerprint(component, source_tag, source_sha, repo_sha, drivers)
+    wanted = fingerprint(component, source_tag, source_sha,
+                         repo_inputs_digest(component), drivers)
     if component == "gate" or event != "schedule":
         published = None
     else:

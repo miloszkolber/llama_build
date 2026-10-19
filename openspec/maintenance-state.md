@@ -46,20 +46,17 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 - Upstream history before the pinned revisions was not inspected for llama.cpp or whisper.cpp; the baseline starts at `v0.7.0` and `v1.9.5`.
 - Only the SYCL, Vulkan, backend-configuration and packaging subset of llama.cpp commits after `v0.7.0` was read, not the full commit list.
 - llama.cpp's release workflow and prebuilt release assets, the oneAPI toolkit release notes for the Deep Learning Essentials respins, and the contents of the base images at digest level were not diffed.
-- The host deployment configuration was read only as deployment evidence during the review. It has since been updated on operator instruction (2026-10-19): the two settings the image does not honour were removed from its environment file, its documentation corrected, and Gate, llama and Whisper recreated from the published `latest` digests `2dd2a653…`, `83ce709e…` and `481fde50…`. All three resolved to byte-identical layer sets compared with the previously deployed digests, so the deployment's image content is unchanged; a bounded `d1-3b` chat completion through Gate returned `42` afterwards. That tree remains owned outside this repository.
+- The host deployment configuration was read only as deployment evidence during the review. It has since been updated on operator instruction (2026-10-19): the two settings the image does not honour were removed from its environment file, its documentation corrected, and both stacks' gates and runtimes refreshed to published `latest`. Every resolved digest matched the previously deployed image's layer set, so the deployment's image content is unchanged; a bounded `d1-3b` chat completion through Gate returned `42` afterwards. Digest-level identity for that host lives in its own deployment tree and is not mirrored here.
 - No image input changed in this run, so no image was rebuilt, and no GPU device discovery, inference or transcription acceptance was executed or claimed.
 
 ### Pending checks
 
 - Triggered CI build and publication for the merge commit: smoke checks, published tags and digests.
-- GPU device discovery and bounded inference (llama) and transcription (Whisper) acceptance for the republished images. They were not rerun here; publication is not deployment. The deployment was updated afterwards and exercised with one bounded llama completion, but no Whisper transcription and no device-discovery check was run.
+- GPU device discovery and bounded inference (llama) and transcription (Whisper) acceptance for the republished images. They were not rerun here; publication is not deployment. The deployment was updated afterwards and exercised with one bounded llama completion, and a retained Whisper fixture check now exists for transcription acceptance, but no device-discovery check was run.
 
-## Pre-merge published state (review baseline)
+## Publication and deployment identity
 
-These are the digests observed while reviewing, before this run's merge. The push build for the merge commit republishes `latest` and the versioned tags with new manifests, so use the exact manifest digest, not a tag, for rollback.
+This file records upstream and review identity: revisions, tags, assets, advisories and findings. It deliberately does not record which image digest a host runs, because published tags are mutable and every rebuild moves them; a pinned digest list here would go stale and cost a rebuild to correct.
 
-| Image | Tag | Manifest digest | `org.opencontainers.image.revision` |
-| --- | --- | --- | --- |
-| `ghcr.io/miloszkolber/llama_runtime` | `latest`, `v0.7.0` | `sha256:57126c6788c08b30b92a762348311fb63443e07ad9a2bef975b03bf234ac2f48` | `620d2225cc436ab0b001e3200e590e3b286ef9ab` |
-| `ghcr.io/miloszkolber/whisper_runtime` | `latest`, `v1.9.5` | `sha256:63a487c2a5e50d87365b7824a00e1ce4a29a0fb35f003065c20490de474aa9bc` | `d1be6fde11ac6e0407606b4e42fe72d34add8037` |
-| `ghcr.io/miloszkolber/gate` | `latest`, `d2f678bec2f5` | `sha256:e5994366cd6914f561907cf190a6a1fb203d6d2174c46b97ac22db5a676aa3b7` | `d2f678bec2f5580f0d4fa3c3034d7973084afe19` |
+- Publication evidence for one build: the workflow run URL, its `docker push` digest lines, and the GHCR tag.
+- Deployment identity, meaning what a host actually runs: the stack README in that host's deployment tree, recorded as the digest resolved at update time. Host deployment is owned outside this repository.

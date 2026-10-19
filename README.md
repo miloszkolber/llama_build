@@ -26,9 +26,9 @@ Compose always pulls remote images. Runtimes use read-only root filesystems with
 - Whisper: Mondays at 02:00 Europe/Warsaw, stable releases >=v1.9.5.
 - Gate: push, pull-request or manual builds. No schedule.
 
-Runs may be delayed. Pushes and pull requests build all three images unless only `README.md` changed. Manual dispatch selects images. Only non-PR runs on the default branch publish.
+Runs may be delayed. Pushes and pull requests build all three images unless the change touched only documentation, planning or documentation-check files, which cannot alter an image. Manual dispatch selects images. Only non-PR runs on the default branch publish.
 
-Each image is built once, smoke-checked, then published as `latest` plus a versioned tag (upstream release tag, or 12-character repository commit for gate). Scheduled runs skip images whose published tag already carries the resolved inputs. Manual rebuilds can still overwrite a versioned tag. Tags keep older release names. OCI labels record source commits and input fingerprints. Use registry digests for exact rollback.
+Each image is built once, smoke-checked, then published as `latest` plus a versioned tag (upstream release tag, or 12-character repository commit for gate). Scheduled runs skip images whose published tag already carries the resolved inputs: the upstream release, the component's build-relevant files (`scripts/fingerprint.py` holds that list, and a test keeps it covering every Dockerfile source) and, for llama, the driver packages. A documentation-only commit therefore never republishes an image. Manual rebuilds can still overwrite a versioned tag. Tags keep older release names. OCI labels record source commits and input fingerprints. Use registry digests for exact rollback.
 
 Intel packages resolve from release assets with SHA256 verification and IGC matched to the compute runtime. Dependabot covers Docker bases and Actions. Upstream compatibility is not guaranteed. A failed resolution, build or smoke check blocks publication of that image. Publication is not atomic across images or tags, and a later failure does not undo an earlier successful push.
 

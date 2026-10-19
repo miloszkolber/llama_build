@@ -1,9 +1,25 @@
 name: Build images
 on:
+  # Documentation, planning and documentation-check changes cannot alter an
+  # image, so they must not republish one. scripts/fingerprint.py holds the
+  # matching build-input list that keeps scheduled runs from rebuilding for
+  # them either.
   push:
-    paths-ignore: ['README.md']
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'openspec/**'
+      - '.github/workflows/docs.yml'
+      - 'scripts/check-docs.mjs'
+      - 'scripts/check-docs.test.mjs'
   pull_request:
-    paths-ignore: ['README.md']
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'openspec/**'
+      - '.github/workflows/docs.yml'
+      - 'scripts/check-docs.mjs'
+      - 'scripts/check-docs.test.mjs'
   schedule:
     - cron: '0 2 * * *'
       timezone: Europe/Warsaw
@@ -94,7 +110,6 @@ jobs:
           COMPONENT: ${{ matrix.component }}
           SOURCE_TAG: ${{ steps.source.outputs.tag }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
-          REPO_SHA: ${{ github.sha }}
           DRIVERS_FILE: ${{ matrix.component == 'llama' && '.build/drivers.json' || '' }}
           EVENT_NAME: ${{ github.event_name }}
           OWNER: ${{ github.repository_owner }}
