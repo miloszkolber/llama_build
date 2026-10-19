@@ -13,12 +13,11 @@ services:
       XDG_CACHE_HOME: /home/runtime/.cache
     read_only: true
     tmpfs: [/tmp]
+    # Gate owns this runtime's lifecycle and waits for its /health before
+    # proxying. Docker reports any stopped container that defines a
+    # healthcheck as unhealthy, so an idle runtime would look failed.
     healthcheck:
-      test: ["CMD", "/app/probe", "llama"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      disable: true
     volumes:
       - ${MODELS_DIR}:/models:ro
       - ${CACHE_DIR}:/home/runtime/.cache
@@ -36,12 +35,10 @@ services:
     group_add: ["${RENDER_GID}"]
     read_only: true
     tmpfs: [/tmp]
+    # See llama-runtime: Gate checks readiness itself, and Docker reports a
+    # deliberately stopped runtime as unhealthy.
     healthcheck:
-      test: ["CMD", "/app/probe", "whisper"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      disable: true
     volumes: ["${MODELS_DIR}:/models:ro"]
     devices: ["${DRI_RENDER}:${DRI_RENDER}"]
 

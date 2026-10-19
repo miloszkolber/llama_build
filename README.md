@@ -18,7 +18,7 @@ docker compose -f compose/docker-compose.yaml up -d llama
 
 One `.env` carries native llama `LLAMA_ARG_*` settings, `WHISPER_*` settings translated by the Go entrypoint, and gate settings.
 
-Compose always pulls remote images. Runtimes use read-only root filesystems with writable `/tmp` and `/health` checks. The llama cache mount must be writable by UID 1000. Gate `--health` checks binary execution, not backend readiness. The Docker socket grants gate control of the host daemon.
+Compose always pulls remote images. Runtimes use read-only root filesystems with writable `/tmp`; the example disables their container health checks, because the gate waits for the runtime's `/health` before proxying and Docker reports any stopped container as unhealthy. The llama cache mount must be writable by UID 1000. Gate `--health` checks binary execution, not backend readiness. The Docker socket grants gate control of the host daemon.
 
 ## Builds
 
