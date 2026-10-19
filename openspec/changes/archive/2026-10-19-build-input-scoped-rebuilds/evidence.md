@@ -47,5 +47,5 @@ Repository checks, all passing:
 ## Residuals
 
 - The first scheduled run after this merge sees a label written by the previous scheme, so it rebuilds once and publishes the new fingerprint. That is expected, not a defect.
-- Trigger filtering cannot be verified locally: the paths-ignore behaviour is proved by the first documentation-only push after the merge, not by a local command. `actionlint` confirms the workflow parses.
+- Trigger filtering was verified after the merge: commit `959c6f1` touched only `openspec/maintenance-state.md` and produced a "Documentation contracts" run (39282143058) with no "Build images" run, while a push containing `compose/` in `d2b5128` did build.
 - No image input changed, so no image was rebuilt for this change and no GPU acceptance is claimed.
