@@ -36,6 +36,10 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 9. Dependabot: `.github/dependabot.yml` covers Docker bases under `/docker` and root Actions weekly. No open or closed-pending PRs beyond the merged 2026-10-13 groups; nothing to defer or duplicate. Repository Dependabot security alerts are disabled, so version PRs are the only automated channel (see below).
 10. SYCL runtime settings: the Level Zero API selection, oneDNN and oneMKL paths, flash attention, graph, fusion, VMM, host-pinned memory and the SYCL relaxations used by the deployment example still exist under those names in the current SYCL documentation, and `GGML_SYCL_ENABLE_HOST_PINNED_MEM=0` matches the documented recommendation to disable it when weights load with `mlock`. oneCCL is neither built nor linked. No action.
 
+### Repairs from this review
+
+Merged after the review, each separately verified and recorded in its own archive: the deployment example no longer sets llama settings the image ignores (`6c3bfcb`); rebuilds are scoped to real build inputs so documentation commits stop republishing images (`d3e886b`); and the on-demand runtimes no longer publish a container health status that Docker reports as failed whenever they idle (`d2b5128`). Deployment identity for the host that was updated stays in that host's deployment tree.
+
 ### Failed or inaccessible sources
 
 - `GET /repos/{owner}/{repo}/dependabot/alerts` returns HTTP 403 "Dependabot alerts are disabled for this repository". Alert coverage could not be read with the available token; only version-update PRs could be observed.
