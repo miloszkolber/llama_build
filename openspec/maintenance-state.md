@@ -46,13 +46,13 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 - Upstream history before the pinned revisions was not inspected for llama.cpp or whisper.cpp; the baseline starts at `v0.7.0` and `v1.9.5`.
 - Only the SYCL, Vulkan, backend-configuration and packaging subset of llama.cpp commits after `v0.7.0` was read, not the full commit list.
 - llama.cpp's release workflow and prebuilt release assets, the oneAPI toolkit release notes for the Deep Learning Essentials respins, and the contents of the base images at digest level were not diffed.
-- The host deployment configuration was read only as deployment evidence. It still sets the two settings the image does not honour and the deployment's own documentation describes a server sleep that the runtime does not implement. That configuration and its documentation are owned outside this repository and were not modified.
+- The host deployment configuration was read only as deployment evidence during the review. It has since been updated on operator instruction (2026-10-19): the two settings the image does not honour were removed from its environment file, its documentation corrected, and Gate, llama and Whisper recreated from the published `latest` digests `2dd2a653…`, `83ce709e…` and `481fde50…`. All three resolved to byte-identical layer sets compared with the previously deployed digests, so the deployment's image content is unchanged; a bounded `d1-3b` chat completion through Gate returned `42` afterwards. That tree remains owned outside this repository.
 - No image input changed in this run, so no image was rebuilt, and no GPU device discovery, inference or transcription acceptance was executed or claimed.
 
 ### Pending checks
 
 - Triggered CI build and publication for the merge commit: smoke checks, published tags and digests.
-- GPU device discovery and bounded inference (llama) and transcription (Whisper) acceptance for the republished images. They were not rerun here; publication is not deployment and the deployment pins its own digests.
+- GPU device discovery and bounded inference (llama) and transcription (Whisper) acceptance for the republished images. They were not rerun here; publication is not deployment. The deployment was updated afterwards and exercised with one bounded llama completion, but no Whisper transcription and no device-discovery check was run.
 
 ## Pre-merge published state (review baseline)
 
