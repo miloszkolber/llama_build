@@ -7,6 +7,7 @@ This repository uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) to keep 
 | [specs/](specs/) | Implemented repository contracts, grouped by capability |
 | [changes/](changes/) | Scoped work with intent, tasks and evidence. Behavior changes also carry requirement deltas |
 | [backlog.md](backlog.md) | Deferred work and branch ownership, not implementation authorization |
+| [maintenance-state.md](maintenance-state.md) | High-water mark of the scheduled dependency review: reviewed upstream revisions, findings with sources, and incomplete coverage |
 | [config.yaml](config.yaml) | Context and rules for OpenSpec artifact instructions |
 
 ## Capability map

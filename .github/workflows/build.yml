@@ -137,9 +137,19 @@ jobs:
             docker cp "$container:/app/gate" .build/gate
             GATE_BINARY="$PWD/.build/gate" go test ./cmd/gate -run TestGateBinaryProfiles -count=1 -v
           else
-            docker run --rm build-test:local --help
             if [ "$COMPONENT" = llama ]; then
+              mkdir -p .build
+              docker run --rm build-test:local --help > .build/llama-help.txt
+              grep -oE 'LLAMA_ARG_[A-Z0-9_]+' compose/.env.example | LC_ALL=C sort -u > .build/example-settings.txt
+              grep -oE 'LLAMA_ARG_[A-Z0-9_]+' .build/llama-help.txt | LC_ALL=C sort -u > .build/image-settings.txt
+              unsupported="$(LC_ALL=C comm -23 .build/example-settings.txt .build/image-settings.txt | tr '\n' ' ')"
+              if [ -n "$unsupported" ]; then
+                echo "compose/.env.example sets settings the image does not honour: $unsupported" >&2
+                exit 1
+              fi
               docker run --rm --entrypoint /lib64/ld-linux-x86-64.so.2 build-test:local --list /app/libggml-sycl.so
+            else
+              docker run --rm build-test:local --help
             fi
           fi
       - uses: docker/login-action@v4
