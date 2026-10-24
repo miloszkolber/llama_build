@@ -770,7 +770,7 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 				_ = ev.tcp.Close()
 				continue
 			}
-			if s.answerDiscovery(ev.tcp, data) {
+			if ev.port == s.config.PortHandoff.DiscoveryPort && s.answerDiscovery(ev.tcp, data) {
 				continue
 			}
 			started, err := s.start(ctx)
@@ -782,7 +782,13 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 				_ = ev.tcp.Close()
 				continue
 			}
-			s.refreshDiscovery(ctx, localHost(ev.tcp))
+			refreshHost := localHost(ev.tcp)
+			if _, _, requestHost := requestLine(data); requestHost != "" {
+				// Match the host the client uses for its probes; a hostname and
+				// an IP would otherwise cache under different keys.
+				refreshHost = requestHost
+			}
+			s.refreshDiscovery(ctx, refreshHost)
 			s.wg.Add(1)
 			go func() { defer s.wg.Done(); s.proxy(ctx, ev.tcp, ev.port, data) }()
 		} else {
