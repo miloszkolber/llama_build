@@ -48,6 +48,8 @@ type PortHandoffConfig struct {
 	TCPPorts         []int    `json:"tcp_ports"`
 	UDPPorts         []int    `json:"udp_ports"`
 	ActivityPrefixes []string `json:"activity_prefixes"`
+	DiscoveryPort    int
+	DiscoveryPaths   []string
 }
 
 func (c Config) IdleTimeout() time.Duration { return time.Duration(c.IdleTimeoutSeconds) * time.Second }
@@ -127,6 +129,131 @@ func inspectConnection(c net.Conn) ([]byte, bool) {
 	}
 	return b[:n], false
 }
+
+// requestLine identifies a plaintext HTTP request without consuming the stream.
+// The gate only needs the method, path and Host to answer cached discovery.
+func requestLine(data []byte) (method, path, host string) {
+	head, _, _ := strings.Cut(string(data), "\r\n\r\n")
+	lines := strings.Split(head, "\r\n")
+	if len(lines) == 0 {
+		return "", "", ""
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) < 2 {
+		return "", "", ""
+	}
+	method, target := fields[0], fields[1]
+	if i := strings.IndexAny(target, "?#"); i >= 0 {
+		target = target[:i]
+	}
+	for _, line := range lines[1:] {
+		name, value, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(name), "host") {
+			host = strings.TrimSpace(value)
+			break
+		}
+	}
+	return method, target, host
+}
+
+func discoveryHost(host string) string {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+}
+
+func (s *HandoffServer) isDiscoveryPath(path string) bool {
+	for _, configured := range s.config.PortHandoff.DiscoveryPaths {
+		if path == configured {
+			return true
+		}
+	}
+	return false
+}
+
+// answerDiscovery serves a cached plaintext discovery response so a client's
+// periodic probe cannot wake an idle runtime. Unknown hosts fall through: the
+// cached response carries the host-specific local address.
+func (s *HandoffServer) answerDiscovery(c net.Conn, data []byte) bool {
+	if s.config.PortHandoff.DiscoveryPort == 0 {
+		return false
+	}
+	method, path, host := requestLine(data)
+	if (method != "GET" && method != "HEAD") || !s.isDiscoveryPath(path) {
+		return false
+	}
+	host = discoveryHost(host)
+	if host == "" {
+		return false
+	}
+	s.cacheMu.Lock()
+	entry, ok := s.cache[host+"\x00"+path]
+	s.cacheMu.Unlock()
+	if !ok {
+		return false
+	}
+	contentType := entry.contentType
+	if contentType == "" {
+		contentType = "text/xml"
+	}
+	header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", contentType, len(entry.body))
+	if method == "HEAD" {
+		_, _ = io.WriteString(c, header)
+	} else {
+		_, _ = c.Write(append([]byte(header), entry.body...))
+	}
+	_ = c.Close()
+	return true
+}
+
+// refreshDiscovery fetches the configured plaintext paths from a started
+// runtime. The response is cached per host so it stays valid while stopped.
+func (s *HandoffServer) refreshDiscovery(ctx context.Context, host string) {
+	if s.config.PortHandoff.DiscoveryPort == 0 {
+		return
+	}
+	host = discoveryHost(host)
+	if host == "" {
+		return
+	}
+	client := &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+	for _, path := range s.config.PortHandoff.DiscoveryPaths {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d%s", s.config.PortHandoff.DiscoveryPort, path), nil)
+		if err != nil {
+			continue
+		}
+		req.Host = host
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("discovery cache %s: %v", path, err)
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+		_ = resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			log.Printf("discovery cache %s: status %d", path, resp.StatusCode)
+			continue
+		}
+		s.cacheMu.Lock()
+		if len(s.cache) >= 64 {
+			s.cache = map[string]cachedDiscovery{}
+		}
+		s.cache[host+"\x00"+path] = cachedDiscovery{body: body, contentType: resp.Header.Get("Content-Type")}
+		s.cacheMu.Unlock()
+	}
+}
+
+func localHost(c net.Conn) string {
+	if address, ok := c.LocalAddr().(*net.TCPAddr); ok {
+		return address.IP.String()
+	}
+	return ""
+}
+
 func waitContext(ctx context.Context, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -593,13 +720,22 @@ type traffic struct {
 	udp  bool
 	id   int
 }
-type HandoffServer struct {
-	config Config
-	docker Docker
-	wg     sync.WaitGroup
+type cachedDiscovery struct {
+	body        []byte
+	contentType string
 }
 
-func NewHandoffServer(c Config, d Docker) *HandoffServer { return &HandoffServer{config: c, docker: d} }
+type HandoffServer struct {
+	config  Config
+	docker  Docker
+	wg      sync.WaitGroup
+	cacheMu sync.Mutex
+	cache   map[string]cachedDiscovery
+}
+
+func NewHandoffServer(c Config, d Docker) *HandoffServer {
+	return &HandoffServer{config: c, docker: d, cache: map[string]cachedDiscovery{}}
+}
 func (s *HandoffServer) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer s.shutdown()
@@ -634,6 +770,9 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 				_ = ev.tcp.Close()
 				continue
 			}
+			if s.answerDiscovery(ev.tcp, data) {
+				continue
+			}
 			started, err := s.start(ctx)
 			if err != nil {
 				_ = ev.tcp.Close()
@@ -643,6 +782,7 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 				_ = ev.tcp.Close()
 				continue
 			}
+			s.refreshDiscovery(ctx, localHost(ev.tcp))
 			s.wg.Add(1)
 			go func() { defer s.wg.Done(); s.proxy(ctx, ev.tcp, ev.port, data) }()
 		} else {
@@ -652,6 +792,9 @@ func (s *HandoffServer) Serve(ctx context.Context) error {
 			}
 			if !started {
 				continue
+			}
+			if host := s.config.PortHandoff.ListenHost; host != "0.0.0.0" {
+				s.refreshDiscovery(ctx, host)
 			}
 		}
 		if err := s.monitor(ctx); err != nil {

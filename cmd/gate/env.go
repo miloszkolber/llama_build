@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // An absent profile preserves the existing two-backend inference proxy.
@@ -61,6 +62,25 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		if p.ActivityPrefixes, err = listFromEnv("GATE_ACTIVITY_PREFIXES", getenv("GATE_ACTIVITY_PREFIXES")); err != nil {
 			return Config{}, err
 		}
+		if raw := getenv("GATE_DISCOVERY_PORT"); raw != "" {
+			p.DiscoveryPort, err = strconv.Atoi(raw)
+			if err != nil || p.DiscoveryPort < 1 || p.DiscoveryPort > 65535 {
+				return Config{}, fmt.Errorf("GATE_DISCOVERY_PORT must be a port between 1 and 65535")
+			}
+		}
+		if raw := getenv("GATE_DISCOVERY_PATHS"); raw != "" {
+			if p.DiscoveryPaths, err = listFromEnv("GATE_DISCOVERY_PATHS", raw); err != nil {
+				return Config{}, err
+			}
+			for _, path := range p.DiscoveryPaths {
+				if !validDiscoveryPath(path) {
+					return Config{}, fmt.Errorf("GATE_DISCOVERY_PATHS must contain absolute HTTP paths without controls or whitespace")
+				}
+			}
+		}
+		if (p.DiscoveryPort == 0) != (len(p.DiscoveryPaths) == 0) {
+			return Config{}, fmt.Errorf("GATE_DISCOVERY_PORT and GATE_DISCOVERY_PATHS must be set together")
+		}
 		c.PortHandoff = p
 	}
 	if err := validateConfig(c); err != nil {
@@ -98,9 +118,33 @@ func portsFromEnv(name, raw string) ([]int, error) {
 	return ports, nil
 }
 
+func validDiscoveryPath(path string) bool {
+	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, "?#") {
+		return false
+	}
+	for _, r := range path {
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func validateConfig(c Config) error {
 	if !validTimeoutSeconds(c.IdleTimeoutSeconds) || !validTimeoutSeconds(c.StartupTimeoutSeconds) || !validTimeoutSeconds(c.ConnectionIdleTimeoutSeconds) {
 		return fmt.Errorf("timeout values must be positive integer seconds without duration overflow")
+	}
+	if c.PortHandoff != nil && c.PortHandoff.DiscoveryPort != 0 {
+		found := false
+		for _, port := range c.PortHandoff.TCPPorts {
+			if port == c.PortHandoff.DiscoveryPort {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("GATE_DISCOVERY_PORT must be one of GATE_TCP_PORTS")
+		}
 	}
 	if c.PersistentProxy != nil {
 		names, runtimes, ports := map[string]bool{}, map[string]bool{}, map[int]bool{}

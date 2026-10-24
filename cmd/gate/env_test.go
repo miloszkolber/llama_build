@@ -86,3 +86,44 @@ func TestEnvironmentRejectsInvalidSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverySettingsArePortHandoffOnly(t *testing.T) {
+	env := handoffEnv()
+	env["GATE_DISCOVERY_PORT"], env["GATE_DISCOVERY_PATHS"] = "47989", "/serverinfo"
+	c, err := ConfigFromEnv(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PortHandoff.DiscoveryPort != 47989 || !reflect.DeepEqual(c.PortHandoff.DiscoveryPaths, []string{"/serverinfo"}) {
+		t.Fatal(c.PortHandoff)
+	}
+	// The inference profile ignores handoff-only discovery settings.
+	if _, err := ConfigFromEnv(func(k string) string { return env[k] }); err != nil {
+		t.Fatal(err)
+	}
+	inference := map[string]string{"GATE_DISCOVERY_PORT": "47989", "GATE_DISCOVERY_PATHS": "/serverinfo"}
+	if c, err := ConfigFromEnv(func(k string) string { return inference[k] }); err != nil || c.PortHandoff != nil {
+		t.Fatalf("inference profile parsed discovery settings: %v %+v", err, c.PortHandoff)
+	}
+}
+
+func TestDiscoverySettingsRejectInvalidPairs(t *testing.T) {
+	cases := map[string][2]string{
+		"port without paths": {"47989", ""},
+		"paths without port": {"", "/serverinfo"},
+		"port outside tcp":   {"47990", "/serverinfo"},
+		"bad port":           {"bad", "/serverinfo"},
+		"relative path":      {"47989", "serverinfo"},
+		"query path":         {"47989", "/serverinfo?x=1"},
+		"empty list entry":   {"47989", "/serverinfo,"},
+	}
+	for name, values := range cases {
+		t.Run(name, func(t *testing.T) {
+			env := handoffEnv()
+			env["GATE_DISCOVERY_PORT"], env["GATE_DISCOVERY_PATHS"] = values[0], values[1]
+			if _, err := ConfigFromEnv(func(k string) string { return env[k] }); err == nil {
+				t.Fatal("invalid discovery settings accepted")
+			}
+		})
+	}
+}
