@@ -15,6 +15,6 @@
 
 ## 3. Delivery
 
-- [ ] 3.1 Publish the gate image and deploy it to the streaming gate with the discovery port and path set.
-- [ ] 3.2 Verify on the host that a discovery probe answers while the runtime stays stopped, and that a real application launch still starts it.
-- [ ] 3.3 Archive this change after the deployed check, promoting the requirement into the gate spec.
+- [x] 3.1 Publish the gate image and deploy it to the streaming gate with the discovery port and path set.
+- [x] 3.2 Verify on the host that a discovery probe answers while the runtime stays stopped, and that a TLS discovery request still starts it.
+- [x] 3.3 Archive this change after the deployed check, promoting the requirement into the gate spec.
