@@ -37,7 +37,7 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 9. Docker base images moved inside their tags: `golang:1.27-bookworm` now resolves to Go 1.27.3, `ubuntu:26.04` and the distroless static base carry newer digests. The input fingerprint still does not cover base digests, so this rebuild is the only reason the helper stage refreshes. The gap stays in [backlog.md](backlog.md).
 10. Advisories: the newest llama.cpp advisory remains CVE-2026-34159 (RPC `GRAPH_COMPUTE` bypass, affected `<= b7991`); the RPC backend is not built and the pinned revision is far past the range. No advisories are published for whisper.cpp, compute-runtime, IGC, Level Zero or oneDNN. No action.
 11. Dependabot: `.github/dependabot.yml` still covers Docker bases under `/docker` and root Actions weekly. One open PR (#5, the Deep Learning Essentials respin) with green checks; it is held with the reason in item 8, not duplicated. No other open PRs.
-12. CI: the last scheduled run (40152285282, 2026-10-25) succeeded and skipped both runtimes because the published fingerprints matched. No scheduled run had been created for 2026-10-26 by 05:10 UTC; GitHub delays scheduled runs, so this is an observation, not a repository failure.
+12. CI: the last scheduled run before this review (40152285282, 2026-10-25) succeeded and skipped both runtimes because the published fingerprints matched. The 2026-10-26 runs were delayed into the morning: the daily llama run waited on the merge's llama build and then skipped in two minutes, and the Monday Whisper run skipped in just over a minute against the freshly published fingerprint. No failure.
 
 ### Repairs from this review
 
@@ -58,8 +58,13 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 
 ### Pending checks
 
-- Triggered CI for this merge: the check job, the three image builds, their smoke checks and publication. The merge changes a Dockerfile and the workflow, so all three images rebuild and republish.
-- GPU device discovery and bounded inference (llama) and transcription (Whisper) for the republished images. None was executed in this review, and publication is not deployment.
+- None outstanding for this run. The triggered CI, publication and GPU acceptance are recorded above.
+
+### Publication and acceptance evidence
+
+- Triggered CI for the merge (`0c7b0cb`): run [40273326116](https://github.com/miloszkolber/llama_build/actions/runs/40273326116) completed green across `check`, `build (gate)`, `build (whisper)` and `build (llama)`, including the smoke checks and the new SYCL-setting assertion. The documentation workflow run [40273326141](https://github.com/miloszkolber/llama_build/actions/runs/40273326141) passed.
+- Published under `latest` and the versioned tag: `gate` `sha256:c7fa8566…` (also `0c7b0cb881ed`), `whisper_runtime` `sha256:06bc2689…` (also `v1.9.5`), `llama_runtime` `sha256:7101ddef…` (also `v0.7.0`).
+- GPU acceptance against the published digests, in transient read-only containers with the deployment's model directory mounted read-only: the llama digest ran with `--device SYCL0 --gpu-layers all` and answered a bounded chat request with `42` (2 predicted tokens), and the previous digest run with identical arguments gave the same answer; the Whisper digest enumerated the Arc Pro B50 through Vulkan, took the VAD path and transcribed the retained JFK fixture correctly. No host deployment, service or configuration was changed.
 
 ## Run 2026-10-19
 

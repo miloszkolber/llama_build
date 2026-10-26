@@ -7,4 +7,4 @@
 - [x] 1.5 Run the repository checks: documentation contract and its tests, OpenSpec strict validation, Go tests and vet, Python unit tests, Compose configuration and actionlint. Verified by the recorded commands and results in `evidence.md`.
 - [x] 1.6 Record the run, its partial coverage and the held items in `openspec/maintenance-state.md`, and the alignment items in `openspec/backlog.md`. Verified by the strict validation and documentation check after the edit.
 - [x] 1.7 Review the assembled diff and archive the change so its delta merges into the main spec. Verified by the strict validation of the synchronized specs.
-- [ ] 1.8 Merge, push and monitor the triggered CI and publication. Verified by the workflow run results and the published digests recorded in `openspec/maintenance-state.md`.
+- [x] 1.8 Merge, push and monitor the triggered CI and publication. Verified by workflow runs 40273326116 and 40273326141, the published digests and the bounded GPU acceptance recorded in `openspec/maintenance-state.md`.
