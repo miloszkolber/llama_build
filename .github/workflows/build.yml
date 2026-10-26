@@ -163,6 +163,18 @@ jobs:
                 exit 1
               fi
               docker run --rm --entrypoint /lib64/ld-linux-x86-64.so.2 build-test:local --list /app/libggml-sycl.so
+              # Every SYCL setting the example sets must be read by the built backend.
+              # A stale name would otherwise be ignored without any visible symptom.
+              container="$(docker create build-test:local)"
+              trap 'docker rm -f "$container" >/dev/null' EXIT
+              docker cp "$container:/app/libggml-sycl.so" .build/libggml-sycl.so
+              grep -oE 'GGML_SYCL_[A-Z0-9_]+' compose/.env.example | LC_ALL=C sort -u > .build/example-sycl.txt
+              grep -aoE 'GGML_SYCL_[A-Z0-9_]+' .build/libggml-sycl.so | LC_ALL=C sort -u > .build/image-sycl.txt
+              unsupported="$(LC_ALL=C comm -23 .build/example-sycl.txt .build/image-sycl.txt | tr '\n' ' ')"
+              if [ -n "$unsupported" ]; then
+                echo "compose/.env.example sets SYCL settings the backend does not read: $unsupported" >&2
+                exit 1
+              fi
             else
               docker run --rm build-test:local --help
             fi

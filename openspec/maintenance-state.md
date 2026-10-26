@@ -2,6 +2,65 @@
 
 Repository-owned high-water mark for the scheduled dependency review. It records what was actually reviewed, from which revision, and what remains unverified. It is not an inventory of current versions (those live in the Dockerfiles, `scripts/resolve.py`, workflows and OCI labels) and not a claim that coverage was complete.
 
+## Run 2026-10-26
+
+- Local revision: `f3f498a` on `master` before this run's merge.
+- Scope: dependency, recipe and advisory review of the gate, llama (Intel SYCL) and Whisper (Vulkan) image inputs, plus the deployment example and the release workflow.
+- Coverage: partial. Only the sources listed below were reviewed, and upstream history before the reviewed boundaries was not re-read.
+
+### Sources reviewed
+
+| Source | Reviewed this run | What was checked |
+| --- | --- | --- |
+| [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | stable `v0.7.0`, commit `620d2225cc436ab0b001e3200e590e3b286ef9ab` (2026-10-15), still the resolver's choice; `master` at recipe level | `.devops/intel.Dockerfile` diff `v0.7.0`→`master`, `docs/backend/SYCL.md` diff, root/common/tools/ggml-SYCL CMake options, `common/arg.cpp` and `CMakeLists.txt` history since 2026-10-15, a shallow checkout of the pinned revision for option names, merged commits since `v0.7.0`, published advisories |
+| [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) | stable `v1.9.5`, commit `d1be6fde11ac6e0407606b4e42fe72d34add8037` (2026-10-06), still the resolver's choice | `.devops/main-vulkan.Dockerfile` diff `v1.9.5`→`master`, `CMakeLists.txt` diff, commits since `v1.9.5`, advisories |
+| [intel/compute-runtime](https://github.com/intel/compute-runtime) | release `26.35.39758.10` (2026-09-17), unchanged | release body, recommended IGC, install procedure, asset identity against the `scripts/resolve.py` patterns |
+| [intel/intel-graphics-compiler](https://github.com/intel/intel-graphics-compiler) | release `v2.41.5` (2026-09-10), unchanged and still the newest | release tag list |
+| [oneapi-src/level-zero](https://github.com/oneapi-src/level-zero) | release `v1.34.0` (2026-09-17), unchanged and still the newest | release tag list, asset suffixes |
+| `intel/deep-learning-essentials` | pinned `2026.1.1-devel-ubuntu24.04` (`sha256:9c3dfd3a…`); respin `2026.1.4-devel-ubuntu24.04`; new `2026.2.0-devel-ubuntu24.04` published 2026-10-22 | Docker Hub tag list and digests |
+| oneDNN offline installer | pinned `intel-onednn-2026.0.2.46_offline.sh`, SHA256 `c82f3d95…74f0` | installer URL identity against the upstream `intel.Dockerfile`; the payload was not re-downloaded |
+| Docker bases | `golang:1.27-bookworm` (`sha256:972b4110…`, Go 1.27.3, 2026-10-21), `ubuntu:26.04` (`sha256:c098726d…`, 2026-10-17), `gcr.io/distroless/static-debian12:nonroot` (`sha256:afa5c872…`) | current tag digests and the resolved toolchain version |
+| GitHub Actions | `actions/checkout` v7.0.1, `actions/setup-go` v7.0.0, `docker/setup-buildx-action` v4.4.1, `docker/build-push-action` v7.4.0, `docker/login-action` v4.7.0, `rhysd/actionlint` 1.7.12 | release tags against the refs the workflow uses |
+| Published images | `llama_runtime` `sha256:24f9904a…`, `whisper_runtime` `sha256:01e1209a…`, `gate` `sha256:803d36ed…` | OCI labels, resolved fingerprints, `scripts/check_inputs.py` skip decision |
+| CI | runs since 2026-10-19 | scheduled and push results, Dependabot PR checks |
+
+### Findings and disposition
+
+1. llama.cpp still resolves to `v0.7.0`, so no source adoption happened in this run. Merged changes after that release were read for recipe impact only, not adopted: the SYCL SSL work ([#30456](https://github.com/ggml-org/llama.cpp/pull/30456), `43d57fb8c`) enables SSL in the example build script and adds `openssl libssl-dev` to the runtime stage; the pinned image already links `libssl.so.3` and `libcrypto.so.3` through `LLAMA_OPENSSL` default `ON` and collects them. Build-thread reduction ([#30236](https://github.com/ggml-org/llama.cpp/pull/30236), `c0083e305`) uses half the cores while this build already uses `--parallel 1`. No action.
+2. New upstream tool to watch: `llama-server --connect` ([#28277](https://github.com/ggml-org/llama.cpp/pull/28277), merged 2026-10-19) adds a `LLAMA_CONNECT` option that downloads a prebuilt Rust binary from `ggml-org/llama-connect` at build time through `scripts/connect-download.cmake`, with the release tag defaulting to `latest` and no digest. The option is `OFF` by default, so nothing is fetched today. If a future release enables it by default, our build would pull an unpinned third-party artifact; it is a separate executable and would not enter the collected rootfs. Recorded in [backlog.md](backlog.md) as a watch item.
+3. SYCL graph record/replay ([#28725](https://github.com/ggml-org/llama.cpp/pull/28725)) and XMX multi-column ESIMD kernels ([#29864](https://github.com/ggml-org/llama.cpp/pull/29864)) merged after `v0.7.0` and add runtime knobs (`GGML_SYCL_GRAPH_EVICTION_TIMEOUT`, `GGML_SYCL_ENABLE_XMX_ESIMD`, `GGML_SYCL_XMX_MAX_COLS`, `GGML_SYCL_XMX_GLU_MAX_COLS`). Graphs stay off by default and the example already sets `GGML_SYCL_ENABLE_GRAPH=0`; the existing names the example uses are unchanged. Adoption follows the next stable release. No performance claim is derived from upstream benchmarks.
+4. Previously recorded divergence confirmed in the local recipe: `docker/llama.Dockerfile` passed `-DLLAMA_CURL=OFF`, but `LLAMA_CURL` is only a deprecation shim at `v0.7.0` (`llama_option_depr(WARNING LLAMA_CURL)`), and HTTPS model download is built unconditionally on cpp-httplib. The flag was inert and read as a disabled capability the image has. Removed in this run; the recipe now states only options the pinned build honours.
+5. `compose/.env.example` sets ten `GGML_SYCL_*` runtime settings that no check covered. All ten are read by the published `libggml-sycl.so`, verified by extracting the module from the image, and the smoke check now asserts that every such name in the example appears in the built module. An unsupported name fails the check and blocks publication.
+6. Whisper remains at `v1.9.5`. Upstream `.devops/main-vulkan.Dockerfile` added `libegl1` for NVIDIA ICDs ([#4108](https://github.com/ggml-org/whisper.cpp/pull/4108)) and `-DGGML_NATIVE=OFF` ([#4111](https://github.com/ggml-org/whisper.cpp/pull/4111)); the second matches our build, and the first is inapplicable because this image ships only the Intel ICD and its loader closure resolves without `libEGL`. Other merged commits are backend syncs plus a model-load `n_vocab` check ([#4097](https://github.com/ggml-org/whisper.cpp/pull/4097)) and a DTW short-window fix ([#4096](https://github.com/ggml-org/whisper.cpp/pull/4096)), which the next stable release adopts.
+7. Intel driver pair unchanged: compute-runtime `26.35.39758.10` still recommends IGC `v2.41.5`, and Level Zero `v1.34.0` is still newest, which is newer than the `v1.32.0` its release body was built against. The loader/driver split already passes device discovery and inference on the deployment. Upstream still pins the older multi-GPU pair (`v2.34.4` / `26.18.38308.1`); the reasoning in the 2026-10-19 run still applies. No action.
+8. Deep Learning Essentials: `2026.1.4-devel-ubuntu24.04` (2026-09-21) exists and Dependabot PR #5 proposes it; `2026.2.0-devel-ubuntu24.04` was published 2026-10-22 and is the first tag of a new oneAPI generation. Upstream's recipe still pins `2026.1.1` in both `v0.7.0` and `master`. Both changes replace the compiler and oneAPI libraries that end up in the scratch image, so they are held for operator input with GPU acceptance rather than merged as a routine respin. See [backlog.md](backlog.md).
+9. Docker base images moved inside their tags: `golang:1.27-bookworm` now resolves to Go 1.27.3, `ubuntu:26.04` and the distroless static base carry newer digests. The input fingerprint still does not cover base digests, so this rebuild is the only reason the helper stage refreshes. The gap stays in [backlog.md](backlog.md).
+10. Advisories: the newest llama.cpp advisory remains CVE-2026-34159 (RPC `GRAPH_COMPUTE` bypass, affected `<= b7991`); the RPC backend is not built and the pinned revision is far past the range. No advisories are published for whisper.cpp, compute-runtime, IGC, Level Zero or oneDNN. No action.
+11. Dependabot: `.github/dependabot.yml` still covers Docker bases under `/docker` and root Actions weekly. One open PR (#5, the Deep Learning Essentials respin) with green checks; it is held with the reason in item 8, not duplicated. No other open PRs.
+12. CI: the last scheduled run (40152285282, 2026-10-25) succeeded and skipped both runtimes because the published fingerprints matched. No scheduled run had been created for 2026-10-26 by 05:10 UTC; GitHub delays scheduled runs, so this is an observation, not a repository failure.
+
+### Repairs from this review
+
+- `docker/llama.Dockerfile`: removed the inert `-DLLAMA_CURL=OFF`.
+- `.github/workflows/build.yml`: the llama smoke check now rejects any `GGML_SYCL_*` name in `compose/.env.example` that the built `libggml-sycl.so` does not read, verified against the published image and against a deliberately unsupported name.
+
+### Failed or inaccessible sources
+
+- `GET /repos/{owner}/{repo}/dependabot/alerts` still returns HTTP 403 "Dependabot alerts are disabled for this repository"; only version-update PRs and published advisories could be observed.
+- The contents of the `2026.1.4` and `2026.2.0` Deep Learning Essentials images were not diffed. Comparing their packaged compiler and library revisions would need both multi-gigabyte bases and a host build, and the decision they inform is held anyway.
+
+### Not reviewed this run
+
+- The full llama.cpp commit list after `v0.7.0`; only the build, SYCL, server-option, dependency and packaging subsets were read.
+- Whisper.cpp history before `v1.9.5`, and llama.cpp history before `v0.7.0`, remain outside the baseline.
+- llama.cpp and Whisper release assets and release workflows: both images build from source, so no release asset is consumed.
+- Intel oneAPI release notes for the `2026.1.2`–`2026.1.4` respins and the `2026.2.0` line.
+
+### Pending checks
+
+- Triggered CI for this merge: the check job, the three image builds, their smoke checks and publication. The merge changes a Dockerfile and the workflow, so all three images rebuild and republish.
+- GPU device discovery and bounded inference (llama) and transcription (Whisper) for the republished images. None was executed in this review, and publication is not deployment.
+
 ## Run 2026-10-19
 
 - Local revision: `d2f678b` on `master` before this run's merge.

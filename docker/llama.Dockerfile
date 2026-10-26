@@ -29,7 +29,7 @@ RUN source /opt/intel/oneapi/setvars.sh --force \
       -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx \
       -DGGML_SYCL=ON -DGGML_SYCL_F16=ON -DGGML_SYCL_DNN=ON -DGGML_NATIVE=OFF \
       -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
-      -DLLAMA_BUILD_TESTS=OFF -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
       -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF \
     && cmake --build build --target llama-server --parallel 1
 
