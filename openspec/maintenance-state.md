@@ -56,7 +56,7 @@ Repository-owned high-water mark for the scheduled dependency review. It records
 
 ### Pending checks
 
-- None outstanding for this run. The follow-up change [maintenance-follow-up](changes/maintenance-follow-up/proposal.md) records the candidate and deployed acceptance; the Whisper fix and base-image refresh detection remain backlog-owned.
+- None outstanding for this run. The follow-up change [maintenance-follow-up](changes/archive/2026-11-02-maintenance-follow-up/proposal.md) records the candidate and deployed acceptance; the Whisper fix and base-image refresh detection remain backlog-owned.
 
 ### Publication and acceptance evidence
 
