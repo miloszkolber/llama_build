@@ -2,6 +2,70 @@
 
 Repository-owned high-water mark for the scheduled dependency review. It records what was actually reviewed, from which revision, and what remains unverified. It is not an inventory of current versions (those live in the Dockerfiles, `scripts/resolve.py`, workflows and OCI labels) and not a claim that coverage was complete.
 
+## Run 2026-11-02
+
+- Local revision: `323c6f0` on `master`; no repository commit landed since the 2026-10-26 run.
+- Scope: llama.cpp `v0.8.0` adoption review (SYCL), Whisper `v1.9.5` and its unreleased history, the Intel driver stack including the new IGC release, Deep Learning Essentials `2026.2.0`, Docker bases, Actions, advisories and Dependabot.
+- Coverage: partial. The llama release range was read at commit level; the Whisper history was read at subject level for recipe impact only.
+
+### Sources reviewed
+
+| Source | Reviewed this run | What was checked |
+| --- | --- | --- |
+| [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | stable `v0.8.0`, commit `8642541b255bfb5dc39cd351a178be09013a55d6` (2026-10-28), adopted by the resolver; 291 commits from `v0.7.0`, of which 65 landed after the previous review's boundary | release notes and API/CLI/ggml change lists, every commit subject in the range, the diffs matching build, dependency, server, SYCL and packaging paths, `.devops/intel.Dockerfile` diff, root and ggml-SYCL CMake options, router/decision-model server paths, advisories |
+| [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) | stable `v1.9.5`, commit `d1be6fde11ac6e0407606b4e42fe72d34add8037`, unchanged | commits since the previous review (ggml v0.28.0 sync, flash-attention padding fix #4127, `.sock` option #4124, Vulkan fixes), `.devops` files, advisories |
+| [intel/compute-runtime](https://github.com/intel/compute-runtime) | release `26.35.39758.10` (2026-09-17), unchanged | release body, recommended IGC |
+| [intel/intel-graphics-compiler](https://github.com/intel/intel-graphics-compiler) | new release `v2.42.6` (2026-10-26); the resolver still pins `v2.41.5` because the compute-runtime release recommends it | release tag list, and whether fix commit `4bfd1c357` is contained in `v2.42.6` |
+| [oneapi-src/level-zero](https://github.com/oneapi-src/level-zero) | release `v1.34.0`, unchanged | release tag list |
+| `intel/deep-learning-essentials` | pinned `2026.1.1`; `2026.1.4` and `2026.2.0` unchanged since 2026-09-21 and 2026-10-22; contents were compared in the 2026-10-26 run | Docker Hub tag list and dates |
+| oneDNN offline installer | pinned `intel-onednn-2026.0.2.46_offline.sh`, same URL and hash as upstream | URL identity |
+| Docker bases | `golang:1.27-bookworm` `sha256:d9b6a1be…` (2026-10-28), `ubuntu:26.04` `sha256:6a06111c…` (2026-10-29), `gcr.io/distroless/static-debian12:nonroot` `sha256:afa5c872…` (unchanged) | current tag digests |
+| GitHub Actions | `actions/checkout` v7.0.1, `actions/setup-go` v7.0.0, `docker/setup-buildx-action` v4.4.1, `docker/build-push-action` v7.4.0, `docker/login-action` v4.7.0, `oven-sh/setup-bun` v2.2.0, `rhysd/actionlint` 1.7.12 | release tags against the refs the workflows use |
+| Published images | `llama_runtime` `latest`/`v0.8.0` `sha256:7846c032…` (revision `8642541b`, inputs `7c5b0b21…`), `whisper_runtime` `sha256:06bc2689…`, `gate` `sha256:c7fa8566…` | OCI labels, `scripts/check_inputs.py` skip decision, final-image dependency closure and help output |
+| Deployment evidence | host containers and their logs, read only | which digests the host runs, when the llama runtime last started and stopped, and what it served |
+
+### Findings and disposition
+
+1. llama.cpp `v0.8.0` was adopted automatically: the resolver moved from `v0.7.0` to `v0.8.0`, the 2026-10-29 daily build published it, and every scheduled run since then reports `skip=true` against the new fingerprint. No planner or recipe change was needed, and no image was rebuilt in this review.
+2. The upstream recipe changes between `v0.7.0` and `v0.8.0` are the two already reviewed on 2026-10-26: half-core build parallelism and `openssl`/`libssl-dev` in the runtime stage. Our image already links `libssl.so.3` and `libcrypto.so.3`. New CMake options are `LLAMA_CONNECT` (default `OFF`) and the WASI exception for `LLAMA_SUBPROCESS` (default still `ON`, no external library). All flags our Dockerfile passes remain valid.
+3. The final-image dependency closure is unchanged: the `NEEDED` lists of `llama-server` and `libggml-sycl.so` at `v0.8.0` are identical to `v0.7.0` (OpenSSL, Level Zero, oneDNN, SYCL, TBB, MKL, Intel math libraries), and the CI loader check passed on the published build. No new runtime package, no new dlopen target.
+4. Behaviour change with a local consumer: `d1-3b` is now classified as a LiquidAI decision model (`lfm2-d1`, added with the d1 family in [#31275](https://github.com/ggml-org/llama.cpp/pull/31275)) and `/v1/chat/completions` returns HTTP 501 "This model is a decision model without text generation, use /v1/systemone". Verified on the published `v0.8.0` image with the deployment's preset file; the same preset answered `42` on the `v0.7.0` image on 2026-10-26. Production consumers are unaffected (the host uses `minicpm-v-4.7-35b-a3b`, `xiaomi-ocr`, `embeddinggemma-2` and `whisper-large-v3`), and the deployed `v0.8.0` runtime served an `embeddinggemma-2` request on 2026-10-30 before the gate's idle stop. The host's documented acceptance shortcut does use `d1-3b` and needs a text-generation preset instead; see [backlog.md](backlog.md).
+5. Router start-up with presets still works without `--model`: a transient container on the published image started with the deployment's `models.ini`, answered `/health` and listed all 12 presets. The release-note item "CLI: `--model` or `-hf` is now required" is a wording change to the error message ([#31242](https://github.com/ggml-org/llama.cpp/pull/31242)) and does not affect preset mode.
+6. Text generation on `v0.8.0` was exercised with the `gemma-4-e2b` preset: HTTP 200 with generated content, so the published image still serves chat for text models. New server capabilities (realtime, TTS, rerank content, reasoning effort, router memory margin default `0`, `--models-autoload` already present at `v0.7.0`, `--connect` with the tool off) are opt-in and need no configuration.
+7. IGC `v2.42.6` appeared on 2026-10-26, but the SYCL JIT "undefined temporary symbol" fix (`4bfd1c357`) is **not** contained in it: the upstream compare reports the fix commit six commits ahead and sixty behind the tag, consistent with the announced IGC `2.43.x` target. The resolver still follows compute-runtime `26.35.39758.10` and pins `v2.41.5`, so the 2026-10-26 DLE hold stands. No action.
+8. Deep Learning Essentials: no new tags. Dependabot PR #6 now proposes the ABI-breaking `2026.2.0-devel-ubuntu24.04`; its CI build is green, but adoption needs the IGC fix and an explicit toolchain decision, so it was commented and left open. See [backlog.md](backlog.md).
+9. Whisper remains at `v1.9.5`, and the resolver's fingerprint still matches. Upstream merged a flash-attention correctness fix ([#4127](https://github.com/ggml-org/whisper.cpp/pull/4127), padded K/V in encoder and cross-attention) that is not in the release; our image enables flash attention, so the next stable release is the adoption path. Other new commits are the ggml v0.28.0 sync, a `.sock` server option and Vulkan fixes. No recipe change.
+10. Advisories: no new llama.cpp, Whisper or Intel advisories. The newest llama.cpp advisory remains CVE-2026-34159 (RPC `GRAPH_COMPUTE`, not built). `v0.8.0` also carries grammar recursion limits and an RPC RDMA bounds check, both hardening rather than open issues here.
+11. Base-image tags moved again inside the tag (`golang:1.27-bookworm`, `ubuntu:26.04`); the input fingerprint still does not cover base digests, so the scheduled builds will not pick these up until another input changes. The gap stays in [backlog.md](backlog.md).
+12. Dependabot: `.github/dependabot.yml` is unchanged. PR #6 (DLE `2026.2.0`) is open with green checks and a review comment; no other PRs. Dependabot alerts remain enabled and readable with no open alerts.
+
+### Repairs from this review
+
+- None. No repository source, workflow, Dockerfile or spec changes were needed; this run updates the ledger and backlog only.
+
+### Failed or inaccessible sources
+
+- Intel's release-note pages reject direct fetches with HTTP 403; the needed content came from the GitHub release bodies and the image contents instead.
+- No other source was inaccessible. The Deep Learning Essentials images were not re-pulled because their tags and dates are unchanged; the package-level comparison from 2026-10-26 still applies.
+
+### Not reviewed this run
+
+- Whisper history before `v1.9.5`, and llama.cpp history before `v0.7.0`, remain outside the baseline.
+- Model-level behaviour beyond the bounded checks: no per-preset generation quality, performance or full-context run was made for `v0.8.0`, and no speed claim follows from upstream benchmarks.
+- The host deployment tree was read as evidence only; its documentation and presets were not changed.
+
+### Pending checks
+
+- None for the repository. The published images already carry these inputs, and the adoption's GPU behaviour was checked with the bounded router and generation runs recorded above.
+- Open with the operator: Dependabot PR #6 (Deep Learning Essentials `2026.2.0`) and the host acceptance-procedure alignment for `d1-3b`.
+
+### Publication and acceptance evidence
+
+- `llama_runtime` `latest` and `v0.8.0` resolve to `sha256:7846c032…`, revision `8642541b`, inputs `7c5b0b21…`, published by the 2026-10-29 scheduled build. `whisper_runtime` and `gate` are unchanged from the 2026-10-26 publication.
+- `scripts/check_inputs.py` reports `skip=true` for both runtimes with fingerprints matching the published labels.
+- Bounded GPU checks on the published `v0.8.0` digest: router start with the deployment preset, `/v1/models` listing 12 presets, `gemma-4-e2b` chat returning generated tokens, and the documented decision-model refusal for `d1-3b`.
+- The host had already deployed the `v0.8.0` digest through its daily job on 2026-10-30 and served a real embedding request; this review did not change the deployment.
+
 ## Run 2026-10-26
 
 - Local revision: `f3f498a` on `master` before this run's merge.
