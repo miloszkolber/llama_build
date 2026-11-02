@@ -5,7 +5,7 @@ COPY go.mod ./
 COPY cmd/probe/ cmd/probe/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /probe ./cmd/probe
 
-FROM intel/deep-learning-essentials:2026.1.1-devel-ubuntu24.04 AS compile
+FROM intel/deep-learning-essentials:2026.2.0-devel-ubuntu24.04 AS compile
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG SOURCE_SHA
 ARG BUILD_DATE
