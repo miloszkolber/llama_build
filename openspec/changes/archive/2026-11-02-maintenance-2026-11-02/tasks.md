@@ -6,4 +6,4 @@
 - [x] 1.4 Check the published `v0.8.0` image's behaviour with the deployment preset: router start, preset listing, a text-generation chat and the decision-model path. Verified by the recorded HTTP results in `evidence.md`.
 - [x] 1.5 Review the Intel stack, advisories and Dependabot: IGC `v2.42.6` contents against the pending fix, Deep Learning Essentials tags, Dependabot PR #6 and its checks. Verified by the compare result and the PR review comment.
 - [x] 1.6 Update `openspec/maintenance-state.md` and `openspec/backlog.md` with the run, the held item and the alignment/watch entries. Verified by strict validation and the documentation check.
-- [ ] 1.7 Archive this change, merge and push, then monitor the triggered documentation CI to green. Verified by the workflow result and the synchronized state.
+- [x] 1.7 Archive this change, merge and push, then monitor the triggered documentation CI to green. Verified by workflow run 41392907353 and the synchronized state.
