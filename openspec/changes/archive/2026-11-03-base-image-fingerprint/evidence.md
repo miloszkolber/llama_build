@@ -47,6 +47,18 @@ That one-time rebuild is expected. The same map, a changed map and an absent map
 - `actionlint` over both workflows — passed.
 - The documentation workflow's Compose command was run locally with the example files copied into place — passed.
 
+## Publication and scheduled skip
+
+CI run 41553209646 completed green for check, gate, llama and Whisper. Published digests and labels:
+
+- `llama_runtime` `v0.8.0` `sha256:ae49b532…`, label `2b1e7656…` — identical to the locally computed fingerprint.
+- `whisper_runtime` `v1.9.5` `sha256:08ca92ad…`, label `d268c4f0…` — identical to the locally computed fingerprint.
+- `gate` `sha256:c8a8234c…`.
+
+With the published labels in place, `scripts/check_inputs.py` reports `skip=true` for both scheduled runtimes and the same fingerprints, so the expected one-time rebuild is over.
+
+The rebuilt images were deployed through the host maintenance job: both runtimes recreated, both gates healthy, outgoing references recorded. Deployed acceptance returned final `42` for `gemma-4-e2b`, the Whisper fixture transcribed, and the idle stop released both runtimes with exit code 0.
+
 ## Pending
 
-Publication of the rebuilt images, the published label check, a scheduled-evaluation skip against the new label, and a temporary-branch compose-only pull request are recorded after the merge.
+None beyond archiving and the documentation CI.

@@ -14,4 +14,10 @@
 
 ## Pending
 
-A temporary-branch pull request that changes only `compose/` must show a Documentation-contracts run and no Build-images run. That result is recorded after the merge.
+None. The temporary-branch pull request is recorded above.
+
+## Verified trigger behavior
+
+Pushed branch `test/compose-only-trigger` with a comment-only change to `compose/.env.example` and opened pull request #7 against `master`. GitHub created exactly one workflow run for that commit — `Documentation contracts` (41553335723) — and no `Build images` run. The documentation run executed the new `Compose syntax` step and passed. The pull request was closed without merging and its branch deleted.
+
+This confirms both halves: a compose-only change no longer starts an image build, and the example is still validated.

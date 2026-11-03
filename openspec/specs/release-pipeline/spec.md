@@ -21,6 +21,11 @@ The pipeline SHALL build gate, llama and Whisper independently on their configur
 - **WHEN** a push or pull request changes only documentation, planning or documentation-check paths, such as `README.md`, `AGENTS.md`, the `openspec/` tree or the documentation checks
 - **THEN** the image workflow does not run for that change
 
+#### Scenario: Deployment-example-only change
+- **WHEN** a push or pull request changes only the deployment example under `compose/`
+- **THEN** the image workflow does not run and no image is built or published
+- **AND** the documentation workflow validates the Compose configuration so the example is still checked
+
 ### Requirement: Pinned release resolution
 
 Upstream builds SHALL resolve an explicit release tag to its commit and otherwise apply the documented eligibility policy.
@@ -71,8 +76,9 @@ Dependabot SHALL propose weekly Docker-base and Actions updates for its configur
 Scheduled image builds SHALL skip the build, smoke check and publication
 when the published versioned tag already carries the resolved inputs
 fingerprint. That fingerprint MUST cover the resolved upstream release, the
-component's build-relevant repository files and, for llama, the resolved
-Intel driver packages.
+component's build-relevant repository files, the linux/amd64 digests of the
+base images its Dockerfile builds from, and, for llama, the resolved Intel
+driver packages.
 
 #### Scenario: Unchanged scheduled inputs
 - **WHEN** a scheduled run resolves inputs whose fingerprint matches the
@@ -85,6 +91,17 @@ Intel driver packages.
   an image, such as documentation or the planning tree
 - **THEN** the resolved fingerprint is unchanged and the scheduled run
   skips that image
+
+#### Scenario: Base-image refresh
+- **WHEN** a base-image tag used by the component's Dockerfile resolves to
+  a different linux/amd64 digest and no other input changed
+- **THEN** the fingerprint differs and the scheduled run builds,
+  smoke-checks and publishes that image
+
+#### Scenario: Base-image resolution failure
+- **WHEN** the base-image digests cannot be resolved
+- **THEN** the scheduled run does not skip the image and reports the
+  resolution failure as the build reason
 
 #### Scenario: Changed or unknown inputs
 - **WHEN** the fingerprint differs, the versioned tag or label is absent,
