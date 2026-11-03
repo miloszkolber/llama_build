@@ -5,9 +5,9 @@ label recorded on the published versioned tag. Fails open: any missing
 tag, missing label, fetch error or non-schedule trigger means build.
 
 The fingerprint covers the resolved upstream release, the component's
-build-relevant repository files and, for llama, the resolved driver
-packages. Documentation-only repository changes therefore do not republish
-an unchanged image.
+build-relevant repository files, the linux/amd64 digests of its Dockerfile
+base images and, for llama, the resolved driver packages. Documentation-only
+repository changes therefore do not republish an unchanged image.
 
 Usage: check_inputs.py <registry-repo> <version-tag>
 Environment: COMPONENT, SOURCE_TAG, SOURCE_SHA, DRIVERS_FILE
@@ -21,6 +21,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from base_images import resolve as resolve_base_images
 from fingerprint import LABEL, fingerprint, repo_inputs_digest
 
 MANIFEST_ACCEPT = ", ".join([
@@ -105,6 +106,13 @@ def decide(event, component, published, wanted):
     return True, "published tag already carries these inputs; skipping"
 
 
+def evaluate(event, component, published, wanted, base_error=None):
+    """Fail open when base-image digests cannot be resolved."""
+    if base_error:
+        return False, f"base-image digests unresolved ({base_error}); building"
+    return decide(event, component, published, wanted)
+
+
 def emit(values):
     for key, value in values.items():
         print(f"{key}={value}")
@@ -121,13 +129,19 @@ def main(argv):
     source_sha = os.getenv("SOURCE_SHA", "")
     drivers = load_drivers(os.getenv("DRIVERS_FILE", ""))
     event = os.getenv("EVENT_NAME", "")
+    base_images = None
+    base_error = None
+    try:
+        base_images = resolve_base_images(component)
+    except Exception as error:  # noqa: BLE001 - any resolution failure must not skip
+        base_error = f"{type(error).__name__}: {error}"
     wanted = fingerprint(component, source_tag, source_sha,
-                         repo_inputs_digest(component), drivers)
+                         repo_inputs_digest(component), drivers, base_images)
     if component == "gate" or event != "schedule":
         published = None
     else:
         published = published_labels(registry_repo, tag)
-    skip, reason = decide(event, component, published, wanted)
+    skip, reason = evaluate(event, component, published, wanted, base_error)
     emit({"skip": str(skip).lower(), "reason": reason, "fingerprint": wanted})
     return 0
 

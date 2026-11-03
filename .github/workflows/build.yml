@@ -1,14 +1,16 @@
 name: Build images
 on:
-  # Documentation, planning and documentation-check changes cannot alter an
-  # image, so they must not republish one. scripts/fingerprint.py holds the
-  # matching build-input list that keeps scheduled runs from rebuilding for
-  # them either.
+  # Documentation, planning, documentation-check and deployment-example
+  # changes cannot alter an image, so they must not republish one.
+  # scripts/fingerprint.py holds the matching build-input list that keeps
+  # scheduled runs from rebuilding for them either. The documentation workflow
+  # validates the Compose example those changes affect.
   push:
     paths-ignore:
       - 'README.md'
       - 'AGENTS.md'
       - 'openspec/**'
+      - 'compose/**'
       - '.github/workflows/docs.yml'
       - 'scripts/check-docs.mjs'
       - 'scripts/check-docs.test.mjs'
@@ -17,6 +19,7 @@ on:
       - 'README.md'
       - 'AGENTS.md'
       - 'openspec/**'
+      - 'compose/**'
       - '.github/workflows/docs.yml'
       - 'scripts/check-docs.mjs'
       - 'scripts/check-docs.test.mjs'
@@ -72,11 +75,6 @@ jobs:
           cache: false
       - run: go test ./... && go vet ./...
       - run: python3 -m unittest discover -s tests
-      - name: Compose syntax
-        run: |
-          cp compose/.env.example compose/.env
-          cp compose/models.ini.example compose/models.ini
-          docker compose -f compose/docker-compose.yaml --profile runtime config --quiet
       - uses: docker://rhysd/actionlint:1.7.12
   build:
     needs: check

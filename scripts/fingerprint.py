@@ -2,9 +2,10 @@
 
 The fingerprint covers everything that can change an image without changing
 its versioned tag: the resolved upstream release, this repository's
-build-relevant files, and the resolved Intel driver set (llama only). The
-workflow records it as an OCI label and skips scheduled rebuilds when the
-published tag already carries it.
+build-relevant files, the linux/amd64 digests of the Dockerfile base images,
+and the resolved Intel driver set (llama only). The workflow records it as an
+OCI label and skips scheduled rebuilds when the published tag already carries
+it.
 
 Repository documentation, the deployment example and the planning tree are
 deliberately absent: editing them must not republish an unchanged image. The
@@ -70,8 +71,9 @@ def repo_inputs_digest(component):
     return digest.hexdigest()
 
 
-def fingerprint(component, tag, sha, repo_inputs, drivers=None):
+def fingerprint(component, tag, sha, repo_inputs, drivers=None, base_images=None):
     canonical = json.dumps({
+        "base_images": base_images,
         "component": component,
         "drivers": drivers_digest(drivers) if drivers is not None else None,
         "repo_inputs": repo_inputs,

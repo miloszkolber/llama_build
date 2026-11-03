@@ -34,11 +34,13 @@ class FingerprintTests(unittest.TestCase):
 
     def test_sensitive_to_every_input(self):
         base = dict(component="llama", tag="v0.7.0", sha="a" * 40,
-                    repo_inputs="b" * 64, drivers=drivers())
+                    repo_inputs="b" * 64, drivers=drivers(),
+                    base_images={"ubuntu:26.04": "sha256:" + "1" * 64})
         reference = inputs.fingerprint(**base)
         for key, value in [("component", "whisper"), ("tag", "v0.7.1"),
                            ("sha", "c" * 40), ("repo_inputs", "d" * 64),
-                           ("drivers", drivers("26.40.0"))]:
+                           ("drivers", drivers("26.40.0")),
+                           ("base_images", {"ubuntu:26.04": "sha256:" + "2" * 64})]:
             altered = dict(base, **{key: value})
             self.assertNotEqual(inputs.fingerprint(**altered), reference, key)
 
@@ -46,6 +48,11 @@ class FingerprintTests(unittest.TestCase):
         without = inputs.fingerprint("whisper", "v1.9.5", "a" * 40, "b" * 64)
         self.assertNotEqual(without, inputs.fingerprint(
             "whisper", "v1.9.5", "a" * 40, "b" * 64, drivers()))
+
+    def test_missing_base_images_differs_from_empty(self):
+        without = inputs.fingerprint("whisper", "v1.9.5", "a" * 40, "b" * 64)
+        self.assertNotEqual(without, inputs.fingerprint(
+            "whisper", "v1.9.5", "a" * 40, "b" * 64, base_images={}))
 
 
 class RepoInputsTests(unittest.TestCase):
@@ -105,3 +112,12 @@ class DecideTests(unittest.TestCase):
         skip, _ = check.decide(
             "schedule", "llama", {inputs.LABEL: "fp", "other": "kept"}, "fp")
         self.assertTrue(skip)
+
+    def test_unresolved_base_images_never_skip(self):
+        labels = {inputs.LABEL: "fp"}
+        skip, reason = check.evaluate("schedule", "llama", labels, "fp",
+                                      base_error="URLError: offline")
+        self.assertFalse(skip)
+        self.assertIn("base-image digests unresolved", reason)
+        self.assertFalse(check.evaluate("push", "llama", labels, "fp",
+                                        base_error="boom")[0])
