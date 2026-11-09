@@ -13,7 +13,7 @@ sha=d1be6fde11ac6e0407606b4e42fe72d34add8037
 
 Registry labels: `llama_runtime` `latest`/`v0.9.0` `sha256:0d2b743c…` (revision `cd959bae`, inputs `62f108e7…`); `whisper_runtime` `sha256:5e856593…` (inputs `c9fb1242…`); `gate` `sha256:c8a8234c…`.
 
-A scheduled evaluation against the published labels returns `skip=true` for llama and, after the rebuild, for Whisper. The Whisper rebuild was required because `golang:1.27-bookworm` moved to `sha256:025eefc1…` after the previous publication; `ubuntu:26.04` and the distroless base are unchanged.
+A scheduled evaluation against the published labels returned `skip=true` for llama. A post-rebuild Whisper evaluation was not recorded. The Whisper rebuild was required because `golang:1.27-bookworm` moved to `sha256:025eefc1…` after the previous publication; `ubuntu:26.04` and the distroless base are unchanged.
 
 ## Adoption evidence from CI
 
@@ -46,9 +46,9 @@ Deployed images: llama `0d2b743c…` (moved by the daily job on 2026-11-07) and 
 Through the gate:
 
 - `gemma-4-e2b` with thinking disabled returned final content `42`.
-- `minicpm-v-4.7-35b-a3b` (q8_0 KV preset, exercising the new XMX flash-attention default) returned HTTP 200 and generated `OK` in `reasoning_content` with 2 completion tokens.
+- `minicpm-v-4.7-35b-a3b` (q8_0 KV preset) returned HTTP 200 and generated `OK` in `reasoning_content` with 2 completion tokens. This does not establish which flash-attention kernel executed.
 - `embeddinggemma-2` returned a 768-dimension vector.
-- `/home/core/scripts/whisper-check.sh` transcribed its retained fixture correctly.
+- The host's Whisper acceptance script transcribed its retained fixture correctly.
 - Both runtimes then exited `0` after the gate's idle stop.
 
 Host rollback references were recorded in the replacement log during deployment.
@@ -56,7 +56,7 @@ Host rollback references were recorded in the replacement log during deployment.
 ## Checks
 
 - `bun scripts/check-docs.mjs`, `bun test scripts/check-docs.test.mjs`, OpenSpec strict validation, `go test ./...`, `go vet ./...`, `python3 -m unittest discover -s tests` — passed.
-- `docker compose … config --quiet` and `actionlint` — passed.
+- Compose configuration and actionlint were reported as passing, but their execution was not recorded in this review's transcript.
 
 ## Residuals
 

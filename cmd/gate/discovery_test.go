@@ -144,8 +144,8 @@ func TestDiscoveryCacheAnswersWithoutWaking(t *testing.T) {
 	if starts != 1 {
 		t.Fatalf("starts=%d after first request", starts)
 	}
-	// Let the gate's idle timeout stop the runtime.
-	deadline := time.Now().Add(4 * time.Second)
+	// The monitor polls every five seconds; allow two polls plus scheduling slack.
+	deadline := time.Now().Add(15 * time.Second)
 	for {
 		d.mu.Lock()
 		running := d.running
