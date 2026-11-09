@@ -2,6 +2,61 @@
 
 Repository-owned high-water mark for the scheduled dependency review. It records what was actually reviewed, from which revision, and what remains unverified. It is not an inventory of current versions (those live in the Dockerfiles, `scripts/resolve.py`, workflows and OCI labels) and not a claim that coverage was complete.
 
+## Run 2026-11-09
+
+- Local revision: `a573be0` on `master`; no repository commit landed since the 2026-11-03 release-pipeline work.
+- Scope: llama.cpp `v0.9.0` adoption review (SYCL), Whisper `v1.9.5`, the Intel driver stack refresh, Docker bases, Actions, advisories, Dependabot and the deployed stack.
+- Coverage: partial. The llama release range was read at commit level and the build-relevant diffs inspected; no per-preset performance or fidelity sweep was run.
+
+### Sources reviewed
+
+| Source | Reviewed this run | What was checked |
+| --- | --- | --- |
+| [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | stable `v0.9.0`, tag commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8` (2026-11-04), adopted automatically by the resolver; 150 commits from `v0.8.0` | release notes and API/server/ggml change lists, every commit subject, the build/dependency/SYCL paths, `.devops/intel.Dockerfile` (unchanged), root CMake options (only the version changed), SYCL documentation diff, advisories |
+| [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) | stable `v1.9.5`, commit `d1be6fde11ac6e0407606b4e42fe72d34add8037`, unchanged | release list, the unresolved flash-attention padding fix (#4127), `.devops` files |
+| [intel/compute-runtime](https://github.com/intel/compute-runtime) | release `26.40.40196.8` (2026-11-03) | release body, component revisions, recommended compiler and Level Zero, asset patterns |
+| [intel/intel-graphics-compiler](https://github.com/intel/intel-graphics-compiler) | release `v2.42.6` (2026-10-26) | release body and dependencies; whether the temporary-symbol fix is included |
+| [oneapi-src/level-zero](https://github.com/oneapi-src/level-zero) | release `v1.35.0` (2026-10-26) | release body and loader version |
+| `intel/deep-learning-essentials` | pinned `2026.2.0-devel-ubuntu24.04`, unchanged | tag list |
+| Docker bases | `golang:1.27-bookworm` `sha256:025eefc1…` (moved after 2026-11-03), `ubuntu:26.04` `sha256:157dc3d6…` (unchanged since 2026-10-29), `gcr.io/distroless/static-debian12:nonroot` `sha256:52dcfbab…` | current linux/amd64 digests through `scripts/base_images.py` |
+| GitHub Actions | `actions/checkout` v7.0.1, `actions/setup-go` v7.0.0, `docker/setup-buildx-action` v4.4.1, `docker/build-push-action` v7.4.0, `docker/login-action` v4.8.0, `oven-sh/setup-bun` v2.2.0, actionlint 1.7.12 | release tags against the refs the workflows use; the workflow uses the `@v4` major ref for login, so the v4.8.0 release is already in effect |
+| Published images | `llama_runtime` `latest`/`v0.9.0` `sha256:0d2b743c…` (revision `cd959bae`, inputs `62f108e7…`), `whisper_runtime` `sha256:5e856593…` (inputs `c9fb1242…`), `gate` `sha256:c8a8234c…` | OCI labels, fingerprints, `--version`, driver manifest, dependency closure |
+| CI | runs 2026-11-04 to 2026-11-09 | daily build results, skip/build reasons, the Whisper dispatch, publication digests |
+
+### Findings and disposition
+
+1. llama.cpp `v0.9.0` was adopted automatically. The 2026-11-05 daily build published it (`f25a6202…`), and the 2026-11-06 build published `0d2b743c…` because the `golang` base digest had moved. The 2026-11-07 and 2026-11-08 runs report `skip=true` against the current label, which also confirms the base-image fingerprint change working as intended.
+2. The recipe and dependency surface are unchanged: `.devops/intel.Dockerfile` is identical to `v0.8.0`, the only root CMake difference is the version, and the final-image `NEEDED` lists are identical to the previous release. Vendored `cpp-httplib` moved to 0.64.0 and `miniaudio` to 0.11.26; neither adds an external runtime package. New audio/TTS endpoints were not exercised and are outside this deployment's use.
+3. The SYCL documentation adds a build option `GGML_SYCL_SUPPORT_XMX` (default `ON`) and a runtime option `GGML_SYCL_FA_DPAS` (default `1`) enabling an XMX flash-attention kernel for `q4_0`/`q8_0` KV caches on Xe2 and newer GPUs. Several deployment presets use `q8_0` KV, so this path is active by default after the adoption. A bounded `minicpm-v-4.7-35b-a3b` request loaded and generated through the deployed image; the returned text appeared in `reasoning_content` because that preset enables reasoning. No fallback or kernel error appeared. This is functional evidence, not a performance or fidelity comparison.
+4. The Intel driver stack moved: compute-runtime `26.40.40196.8`, IGC `v2.42.6` (the release the runtime recommends) and Level Zero `v1.35.0`. The published image contains exactly those versions and the loader resolves the full closure. IGC `v2.42.6` still does not include fix `4bfd1c357` for the reported temporary-symbol JIT defect; upstream scheduled it for `2.43.x`, and the current Release image with compiler `2026.2.0` passes the bounded checks.
+5. Whisper remains `v1.9.5`; the flash-attention padding fix is still unreleased. The manual Whisper dispatch rebuilt only to pick up the moved `golang` base digest (`5e856593…`, inputs `c9fb1242…`), then the host deployed and accepted it.
+6. Advisories: no new llama.cpp, Whisper or Intel advisories. The newest llama.cpp advisory remains CVE-2026-34159 (RPC backend, not built).
+7. Dependabot: no open or newly created PRs this cycle; `.github/dependabot.yml` is unchanged. The new `docker/login-action` v4.8.0 release needs no change because the workflow tracks the `v4` major ref.
+8. Deployment: the daily job had already moved the llama runtime to `0d2b743c…` on 2026-11-07; this run deployed `whisper_runtime` `5e856593…` after its rebuild. Both gates remained on `c8a8234c…`. Deployed acceptance returned final `42` for `gemma-4-e2b`, generated from the q8-KV MiniCPM preset, produced a 768-dimension embedding, and transcribed the Whisper fixture; the 300-second idle stop released both runtimes with exit code 0.
+
+### Repairs from this review
+
+- None beyond publication and deployment. No repository source, workflow, Dockerfile or spec change was needed.
+
+### Failed or inaccessible sources
+
+- No source was inaccessible. Docker Hub briefly rate-limited anonymous manifest requests during local fingerprint evaluation; `scripts/base_images.py` resolves again and CI resolved the same digests. The documented fail-open behavior applies if it recurs.
+
+### Not reviewed this run
+
+- The full diff bodies of all 150 commits; subjects and build/dependency/SYCL paths were inspected.
+- Per-preset performance and fidelity under the new DPAS flash-attention path, full-context behavior, and the new audio/TTS endpoints.
+- Whisper history before `v1.9.5` and llama.cpp history before `v0.8.0` remain outside the baseline.
+
+### Pending checks
+
+- None outstanding. The Whisper flash-attention fix waits for its next stable release; that is an upstream trigger, not local work.
+
+### Publication and acceptance evidence
+
+- CI: 2026-11-04 `15ec3d6f…` (driver refresh, `v0.8.0`), 2026-11-05 `f25a6202…` (`v0.9.0`), 2026-11-06 `0d2b743c…` (base refresh), 2026-11-07 and 2026-11-08 skipped. Whisper dispatch 42565138473 published `5e856593…`.
+- Deployed: `llama_runtime` `0d2b743c…`, `whisper_runtime` `5e856593…`, `gate` `c8a8234c…`. Acceptance and idle release are recorded above; host-specific identity and rollback stay in that host's deployment tree.
+
 ## Run 2026-11-02
 
 - Local revision: `323c6f0` on `master`; no repository commit landed since the 2026-10-26 run.
