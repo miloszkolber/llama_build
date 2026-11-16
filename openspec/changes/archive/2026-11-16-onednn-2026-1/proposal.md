@@ -4,7 +4,7 @@
 
 The upstream llama.cpp `v1.0.0` Intel recipe installs standalone oneDNN `2026.1.0.625`, while the local image still uses `2026.0.2.46`. Both use Deep Learning Essentials `2026.2.0`. The local image needs a verified compatibility check before adopting the newer GPU library.
 
-## Scope
+## What Changes
 
 Update the existing checksum-pinned standalone installer to the upstream recipe's version. Preserve SYCL flags, driver selection, collection of runtime libraries and notices, model presets and deployment settings. No implemented requirement changes.
 

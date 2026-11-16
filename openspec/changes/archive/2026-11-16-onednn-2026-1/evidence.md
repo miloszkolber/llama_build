@@ -23,3 +23,9 @@
 - Two short embedding vectors were identical across images and each contained 768 finite values.
 - A longer embedding fixture was run on both images with `SYCL0`, 25 of 25 model layers offloaded, flash attention and oneDNN enabled. Verbose logs explicitly recorded `FA-DISP ... ONEDNN` and oneDNN GPU SDPA execution. The two 768-element embeddings were identical, with cosine similarity 1.0 and maximum absolute difference 0.
 - These are bounded comparisons, not a full-context, multimodal or every-preset fidelity sweep. No performance improvement is inferred.
+
+## Publication and deployment
+
+- Push build `43814597656` completed successfully for all three images. It published `llama_runtime:latest` and `v1.0.0` at `sha256:969e6939681de3b0e0ba7ae0c040b3118a89ba018ad77b65d7d4cb766923d2e1`, `gate:latest` and `1fd6a8787bb9` at `sha256:40381e69b55f5658d6691c09597b424d9af9df161d4fdd1cb89d7433f0ab3303`, and `whisper_runtime:latest` and `v1.9.5` at `sha256:eb045ce6d1635bdb6f7a7ac0f2dcf786e429d85171dd205f33c26a807858f979`.
+- The exact published llama image resolved oneDNN `2026.1`, reported `SYCL0`, executed logged oneDNN GPU SDPA, and reproduced the baseline long embedding exactly.
+- After an idle check and recording outgoing pullable references, the llama runtime and gate were replaced with the new published digests. Gate health, Gemma `42`, two finite 768-element embeddings and the pinned Whisper transcription fixture passed through the serving path. Both runtimes subsequently exited 0 after the idle timeout.
