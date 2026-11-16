@@ -1,0 +1,16 @@
+diff --git a/examples/server/server.cpp b/examples/server/server.cpp
+--- a/examples/server/server.cpp
++++ b/examples/server/server.cpp
+@@ -1070,7 +1070,11 @@ int main(int argc, char ** argv) {
+         } else if (params.response_format == vjson_format) {
+             /* try to match openai/whisper's Python format */
+             std::string results = output_str(ctx, params, pcmf32s);
+-            const char * language = whisper_lang_str_or_unknown(whisper_full_lang_id(ctx));
++            const char * language = whisper_lang_str_or_unknown(whisper_full_lang_id(ctx));
++            if (whisper_full_n_segments(ctx) == 0) {
++                language = params.language == "auto" ? "unknown"
++                    : whisper_lang_str_or_unknown(whisper_lang_id(params.language.c_str()));
++            }
+             json jres = json{
+                 {"task", params.translate ? "translate" : "transcribe"},
+                 {"language", language},

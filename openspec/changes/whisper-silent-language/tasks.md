@@ -1,0 +1,7 @@
+# Tasks
+
+- [x] 1.1 Reproduce the misleading automatic-language field and distinguish it from detected-language probabilities.
+- [x] 1.2 Implement a context-guarded overlay, fingerprint it and verify the guard paths.
+- [x] 1.3 Build and test silent automatic and explicit language, speech fidelity, and Intel Vulkan.
+- [ ] 1.4 Publish, deploy during an idle window and verify the deployed paths and idle release.
+- [ ] 1.5 Review and archive the completed change with synchronized specs and monitored CI.

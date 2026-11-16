@@ -31,6 +31,7 @@ BUILD_INPUTS = {
               "scripts/resolve.py", ".github/workflows/build.yml"],
     "whisper": ["docker/whisper.Dockerfile", "scripts/collect-rootfs.py",
                 "scripts/apply_whisper_vad_fix.py", "patches/whisper-empty-vad-language.patch",
+                "patches/whisper-empty-vad-auto-language.patch",
                 "go.mod", "cmd/probe", "cmd/whisper",
                 "scripts/resolve.py", ".github/workflows/build.yml"],
 }
