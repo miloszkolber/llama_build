@@ -11,7 +11,7 @@ ARG SOURCE_SHA
 ARG BUILD_DATE
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake ninja-build python3 ca-certificates libssl-dev ocl-icd-libopencl1
-ADD --checksum=sha256:c82f3d950d568ca4108c0876dc245d5f41518cce4ffa935cab2c4a8e1acc74f0 https://registrationcenter-download.intel.com/akdlm/IRC_NAS/94c3dbac-0852-45be-a57d-21c204cada3e/intel-onednn-2026.0.2.46_offline.sh /tmp/onednn.sh
+ADD --checksum=sha256:38c2585bc01b62e011cc1678e090be68ed1574c7a9fc9d775b09cb6ebd041427 https://registrationcenter-download.intel.com/akdlm/IRC_NAS/46452a4a-7b7f-49f2-be4c-602a900180bb/intel-onednn-2026.1.0.625_offline.sh /tmp/onednn.sh
 RUN bash /tmp/onednn.sh -s -a --silent --eula accept \
     && rm -f /tmp/onednn.sh
 COPY scripts/install-drivers.py /install-drivers.py
