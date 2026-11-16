@@ -19,6 +19,9 @@ WORKDIR /src
 RUN git init -q && git remote add origin https://github.com/ggml-org/whisper.cpp.git \
     && git fetch --depth 1 origin "$SOURCE_SHA" && git checkout -q FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+COPY patches/whisper-empty-vad-language.patch /tmp/whisper-empty-vad-language.patch
+COPY scripts/apply_whisper_vad_fix.py /tmp/apply_whisper_vad_fix.py
+RUN python3 /tmp/apply_whisper_vad_fix.py "$SOURCE_SHA" /tmp/whisper-empty-vad-language.patch
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
       -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DWHISPER_BUILD_TESTS=OFF \
       -DWHISPER_BUILD_IS_DEV=OFF -DWHISPER_COMMON_FFMPEG=ON \
